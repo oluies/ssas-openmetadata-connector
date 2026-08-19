@@ -1,18 +1,31 @@
 #!/usr/bin/env bash
-# Leak-gate: block any commit whose staged file CONTENTS contain identifying tokens.
-# Content-based (not diff-based), correct exit codes. Constitution principle I.
+# Leak-gate: block a commit whose staged file CONTENTS contain identifying tokens.
+# Content-based, correct exit codes. Constitution principle I.
+# Real host/IP/SID/connection-strings are blocked; reserved/loopback/documentation
+# addresses (127.x, 0.0.0.0, RFC-5737 192.0.2/198.51.100/203.0.113) are allowed —
+# they are networking constants / test data, not "the host".
 set -euo pipefail
-patterns='(\b[0-9]{1,3}(\.[0-9]{1,3}){3}\b)|(\bWIN-[A-Z0-9]{6,}\b)|(\bS-1-([0-9]+-)+[0-9]+\b)|((Data Source|Initial Catalog|User ID|Password)=)'
+
+nonip='(\bWIN-[A-Z0-9]{6,}\b)|(\bS-1-([0-9]+-)+[0-9]+\b)|((Data Source|Initial Catalog|User ID|Password)=)'
+allow_ip='^(127\.|0\.0\.0\.0$|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.|255\.255\.255\.)'
+
 leak=0
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   case "$f" in .githooks/pre-commit) continue;; esac
-  if grep -qEI "$patterns" "$f" 2>/dev/null; then
-    echo "leak-gate: identifying token in staged file: $f" >&2
-    leak=1
+  # non-IP token classes
+  if grep -qEI "$nonip" "$f" 2>/dev/null; then
+    echo "leak-gate: host/SID/connection-string token in: $f" >&2; leak=1
   fi
+  # any IPv4 that is NOT in the allowlist
+  while IFS= read -r ip; do
+    if ! printf '%s' "$ip" | grep -qE "$allow_ip"; then
+      echo "leak-gate: non-reserved IP '$ip' in: $f" >&2; leak=1
+    fi
+  done < <(grep -oEI '\b[0-9]{1,3}(\.[0-9]{1,3}){3}\b' "$f" 2>/dev/null | sort -u)
 done < <(git diff --cached --name-only --diff-filter=ACM)
+
 if [ "$leak" != 0 ]; then
-  echo "COMMIT BLOCKED: remove host/IP/SID/connection-string tokens (constitution I)." >&2
+  echo "COMMIT BLOCKED: remove real host/IP/SID/connection-string tokens (constitution I)." >&2
   exit 1
 fi
