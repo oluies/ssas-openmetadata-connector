@@ -19,6 +19,7 @@ import argparse
 import os
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 try:
@@ -82,7 +83,7 @@ EXECUTE_TMPL = (
 )
 
 
-def _scrubber(host: str, user: str, machine: str | None = None) -> callable:
+def _scrubber(host: str, user: str, machine: str | None = None) -> Callable[[str], str]:
     """Return a function that removes identifying tokens from response text."""
     patterns: list[tuple[re.Pattern, str]] = []
     # explicit host (with/without scheme) and username
