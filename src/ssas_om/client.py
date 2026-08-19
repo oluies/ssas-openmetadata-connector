@@ -1,4 +1,108 @@
-"""XMLA-over-HTTP Basic client: Discover/Execute, fault handling, redaction.
+"""XMLA-over-HTTP client: Discover / Execute with Basic auth.
 
-NOT IMPLEMENTED YET — T005.
+Never logs request bodies or the Authorization header. Faults are surfaced as data
+(not exceptions) with a scrubbed reason. The transport is injectable so tests run
+entirely offline against recorded fixtures.
+
+Reference: [MS-SSAS] Authenticate/Discover/Execute over SOAP/XMLA on HTTP.
 """
+from __future__ import annotations
+
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from .redact import make_scrubber
+
+XMLA_NS = "urn:schemas-microsoft-com:xml-analysis"
+SOAP_NS = "http://schemas.xmlsoap.org/soap/envelope/"
+
+# transport(url, body, soap_action) -> (status_code, response_text)
+Transport = Callable[[str, str, str], "tuple[int, str]"]
+
+_FAULT = re.compile(r"<faultstring>(.*?)</faultstring>", re.S)
+_DESC = re.compile(r'Description="([^"]+)"')
+
+_DISCOVER = (
+    '<Envelope xmlns="{soap}"><Body><Discover xmlns="{xmla}">'
+    "<RequestType>{rtype}</RequestType>"
+    "<Restrictions><RestrictionList>{restr}</RestrictionList></Restrictions>"
+    "<Properties><PropertyList>{props}</PropertyList></Properties>"
+    "</Discover></Body></Envelope>"
+)
+_EXECUTE = (
+    '<Envelope xmlns="{soap}"><Body><Execute xmlns="{xmla}">'
+    "<Command><Statement>{stmt}</Statement></Command>"
+    "<Properties><PropertyList>{props}</PropertyList></Properties>"
+    "</Execute></Body></Envelope>"
+)
+
+
+@dataclass(frozen=True)
+class XmlaResult:
+    status: int
+    text: str
+    fault: str | None
+
+    @property
+    def ok(self) -> bool:
+        return self.status == 200 and self.fault is None
+
+
+def _requests_transport(url: str, user: str, password: str) -> Transport:
+    import requests  # imported lazily so parser tests need no network stack
+
+    session = requests.Session()
+    session.auth = (user, password)
+
+    def _send(u: str, body: str, action: str) -> tuple[int, str]:
+        r = session.post(
+            u,
+            data=body.encode("utf-8"),
+            headers={"Content-Type": "text/xml; charset=utf-8",
+                     "SOAPAction": f'"{action}"'},
+            timeout=60,
+        )
+        return r.status_code, r.text
+
+    return _send
+
+
+class XmlaClient:
+    def __init__(
+        self,
+        url: str,
+        user: str,
+        password: str,
+        transport: Transport | None = None,
+    ) -> None:
+        self._url = url
+        self._scrub = make_scrubber(host=url, user=user)
+        self._transport = transport or _requests_transport(url, user, password)
+
+    # -- public API -----------------------------------------------------------------
+    def discover(
+        self, request_type: str, catalog: str | None = None, restrictions: str = ""
+    ) -> XmlaResult:
+        props = f"<Catalog>{catalog}</Catalog>" if catalog else ""
+        body = _DISCOVER.format(soap=SOAP_NS, xmla=XMLA_NS, rtype=request_type,
+                                restr=restrictions, props=props)
+        return self._call(body, f"{XMLA_NS}:Discover")
+
+    def execute(self, statement: str, catalog: str | None = None) -> XmlaResult:
+        props = f"<Catalog>{catalog}</Catalog>" if catalog else ""
+        body = _EXECUTE.format(soap=SOAP_NS, xmla=XMLA_NS, stmt=statement, props=props)
+        return self._call(body, f"{XMLA_NS}:Execute")
+
+    def dmv(self, rowset: str, catalog: str | None = None) -> XmlaResult:
+        """SELECT * FROM $SYSTEM.<rowset> — the reader-accessible metadata path."""
+        return self.execute(f"SELECT * FROM $SYSTEM.{rowset}", catalog=catalog)
+
+    # -- internals ------------------------------------------------------------------
+    def _call(self, body: str, action: str) -> XmlaResult:
+        status, text = self._transport(self._url, body, action)
+        return XmlaResult(status=status, text=text, fault=self._fault(text))
+
+    def _fault(self, text: str) -> str | None:
+        m = _FAULT.search(text) or _DESC.search(text)
+        return self._scrub(m.group(1).strip())[:300] if m else None
