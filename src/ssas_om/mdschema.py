@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .client import XmlaClient, parse_rowset
-from .enums import DIMENSION_TYPE, aggregator_name, oledb_to_om_type
+from .enums import aggregator_name, dimension_type_name, oledb_to_om_type
 
 
 @dataclass(frozen=True)
@@ -74,7 +74,7 @@ def parse_dimensions(dims_text: str, levels_text: str) -> list[MdDimension]:
     dims = []
     for r in parse_rowset(dims_text):
         uniq = r.get("DIMENSION_UNIQUE_NAME", "")
-        dtype = DIMENSION_TYPE.get(int(r.get("DIMENSION_TYPE") or 0), "Unknown")
+        dtype = dimension_type_name(r.get("DIMENSION_TYPE"))
         dims.append(
             MdDimension(
                 name=r.get("DIMENSION_NAME", ""),

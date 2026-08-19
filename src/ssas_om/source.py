@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from typing import Any
+from xml.sax.saxutils import escape
 
 from metadata.generated.schema.api.data.createDatabase import CreateDatabaseRequest
 from metadata.generated.schema.api.data.createDatabaseSchema import (
@@ -77,8 +78,13 @@ class SsasSource(Source):
         return None
 
     def test_connection(self) -> None:
-        # a reader-accessible, non-admin probe
-        self.client.discover("DISCOVER_DATASOURCES")
+        # a reader-accessible, non-admin probe; a 401/403/fault is NOT healthy
+        r = self.client.discover("DISCOVER_DATASOURCES")
+        if not r.ok:
+            raise ConnectionError(
+                f"SSAS connection check failed (HTTP {r.status})"
+                + (f": {r.fault}" if r.fault else "")
+            )
 
     def _catalogs(self) -> list[Catalog]:
         cats = list_catalogs(self.client)
@@ -87,28 +93,35 @@ class SsasSource(Source):
         return cats
 
     def _iter(self) -> Iterable[Either[Entity]]:
+        emitted_service = False
         for cat in self._catalogs():
             if cat.kind != "tabular":
                 continue  # milestone-1: tabular database service
             r = self.client.discover(
                 "DISCOVER_CSDL_METADATA",
                 catalog=cat.name,
-                restrictions=f"<CATALOG_NAME>{cat.name}</CATALOG_NAME>",
+                restrictions=f"<CATALOG_NAME>{escape(cat.name)}</CATALOG_NAME>",
             )
             if not r.ok:
                 continue
             model = parse_csdl(r.text)
+            # relationships are parsed but lineage emission is out of milestone-1 scope
             plan, _rels = plan_tabular(model, service=self.service_name, database=cat.name)
+            if not emitted_service:
+                yield self._service_request()
+                emitted_service = True
             yield from self._emit_database(plan)
 
-    def _emit_database(self, plan: ServicePlan) -> Iterable[Either[Entity]]:
-        yield Either(
+    def _service_request(self) -> Either[Entity]:
+        return Either(
             right=CreateDatabaseServiceRequest(
-                name=plan.service,
+                name=self.service_name,
                 serviceType=DatabaseServiceType.CustomDatabase,
                 connection=self.config.serviceConnection.root,
             )
         )
+
+    def _emit_database(self, plan: ServicePlan) -> Iterable[Either[Entity]]:
         db = f"{plan.service}.{plan.database}"
         yield Either(right=CreateDatabaseRequest(name=plan.database, service=plan.service))
         for schema in plan.schemas:

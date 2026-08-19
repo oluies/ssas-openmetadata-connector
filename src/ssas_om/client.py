@@ -11,6 +11,8 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from urllib.parse import urlsplit
+from xml.sax.saxutils import escape
 
 from .redact import make_scrubber
 
@@ -77,21 +79,21 @@ class XmlaClient:
         transport: Transport | None = None,
     ) -> None:
         self._url = url
-        self._scrub = make_scrubber(host=url, user=user)
+        self._scrub = make_scrubber(host=urlsplit(url).hostname or url, user=user)
         self._transport = transport or _requests_transport(url, user, password)
 
     # -- public API -----------------------------------------------------------------
     def discover(
         self, request_type: str, catalog: str | None = None, restrictions: str = ""
     ) -> XmlaResult:
-        props = f"<Catalog>{catalog}</Catalog>" if catalog else ""
+        props = f"<Catalog>{escape(catalog)}</Catalog>" if catalog else ""
         body = _DISCOVER.format(soap=SOAP_NS, xmla=XMLA_NS, rtype=request_type,
                                 restr=restrictions, props=props)
         return self._call(body, f"{XMLA_NS}:Discover")
 
     def execute(self, statement: str, catalog: str | None = None) -> XmlaResult:
-        props = f"<Catalog>{catalog}</Catalog>" if catalog else ""
-        body = _EXECUTE.format(soap=SOAP_NS, xmla=XMLA_NS, stmt=statement, props=props)
+        props = f"<Catalog>{escape(catalog)}</Catalog>" if catalog else ""
+        body = _EXECUTE.format(soap=SOAP_NS, xmla=XMLA_NS, stmt=escape(statement), props=props)
         return self._call(body, f"{XMLA_NS}:Execute")
 
     def dmv(self, rowset: str, catalog: str | None = None) -> XmlaResult:
@@ -104,7 +106,11 @@ class XmlaClient:
         return XmlaResult(status=status, text=text, fault=self._fault(text))
 
     def _fault(self, text: str) -> str | None:
-        m = _FAULT.search(text) or _DESC.search(text)
+        m = _FAULT.search(text)
+        if m is None and ("<soap:Fault" in text or "<Fault" in text or "faultcode" in text):
+            # Description= only counts as a fault when a SOAP Fault is present;
+            # CSDL bi:Property/bi:Measure annotations also carry Description= legitimately.
+            m = _DESC.search(text)
         return self._scrub(m.group(1).strip())[:300] if m else None
 
 

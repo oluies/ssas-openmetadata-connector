@@ -24,7 +24,7 @@ services:
     expose:
       - 3306
     ports:
-      - "13306:3306"
+      - "127.0.0.1:13306:3306"
     volumes:
      - ./docker-volume/db-data:/var/lib/mysql
     networks:
@@ -44,8 +44,8 @@ services:
     networks:
       - app_net
     ports:
-      - "19200:9200"
-      - "19300:9300"
+      - "127.0.0.1:19200:9200"
+      - "127.0.0.1:19300:9300"
     healthcheck:
       test: "curl -s http://localhost:9200/_cluster/health?pretty | grep status | grep -qE 'green|yellow' || exit 1"
       interval: 15s
@@ -532,7 +532,7 @@ services:
     expose:
       - 8080
     ports:
-      - "18080:8080"
+      - "127.0.0.1:18080:8080"
     networks:
       - app_net
     volumes:

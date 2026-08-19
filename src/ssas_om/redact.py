@@ -28,7 +28,7 @@ def make_scrubber(
     literals: list[tuple[re.Pattern[str], str]] = []
     for tok, repl in ((host, "HOST"), (machine, "HOST"), (user, "USER")):
         if tok:
-            bare = re.sub(r"^https?://", "", tok).strip("/")
+            bare = re.sub(r"^https?://", "", tok).strip("/").split("/", 1)[0]
             literals.append((re.compile(re.escape(bare), re.I), f"<{repl}>"))
             if bare != tok:
                 literals.append((re.compile(re.escape(tok), re.I), f"<{repl}>"))

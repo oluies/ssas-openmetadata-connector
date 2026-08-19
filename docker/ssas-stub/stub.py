@@ -7,11 +7,19 @@ matching tests/fixtures/xmla/<endpoint>/<name>.xml. Read-only, localhost, no aut
 """
 from __future__ import annotations
 
+import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-FIXTURES = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "xmla"
+# Configurable so it works both from the repo checkout and inside the image
+# (where stub.py lives at /app and fixtures are copied to /tests/fixtures).
+FIXTURES = Path(
+    os.environ.get(
+        "SSAS_STUB_FIXTURES",
+        str(Path(__file__).resolve().parent.parent.parent / "tests" / "fixtures" / "xmla"),
+    )
+)
 ENDPOINTS = {"/olap-tab/msmdpump.dll": "tab", "/olap-md/msmdpump.dll": "md"}
 
 _RTYPE = re.compile(r"<RequestType>([^<]+)</RequestType>")

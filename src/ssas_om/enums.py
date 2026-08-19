@@ -72,7 +72,19 @@ def aggregator_name(code: int | str | None) -> str:
 
 
 # --- MDSCHEMA_DIMENSIONS.DIMENSION_TYPE --------------------------------------------
-DIMENSION_TYPE = {0: "Unknown", 1: "Time", 2: "Measure", 3: "Regular"}
+DIMENSION_TYPE = {
+    0: "Unknown", 1: "Time", 2: "Measure", 3: "Other", 5: "Quantitative",
+    6: "Accounts", 7: "Customers", 8: "Products", 9: "Scenario", 10: "Utility",
+    11: "Currency", 12: "Rates", 13: "Channel", 14: "Promotion", 15: "Organization",
+    16: "BillOfMaterials", 17: "Geography",
+}
+
+
+def dimension_type_name(code: int | str | None) -> str:
+    try:
+        return DIMENSION_TYPE.get(int(code), "Unknown")  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return "Unknown"
 
 # --- MDSCHEMA_HIERARCHIES.HIERARCHY_ORIGIN (bitmask) -------------------------------
 HIERARCHY_ORIGIN_USER = 0x1

@@ -19,8 +19,5 @@ def test_plan_from_csdl_fixture(fixture_xml):
     assert fis_cols["ProductKey"].is_measure is False
 
     # table-level relationship carried for lineage
-    assert RelationshipTuple(rels) == {("FactInternetSales", "DimProduct")}
+    assert {(r.from_table, r.to_table) for r in rels} == {("FactInternetSales", "DimProduct")}
 
-
-def RelationshipTuple(rels):
-    return {(r.from_table, r.to_table) for r in rels}
