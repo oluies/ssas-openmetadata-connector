@@ -95,3 +95,23 @@ D. **MD cube mapping shape** — represent the cube as a database service too (m
    shape? Or a different representation for cubes?
 E. **MSSQL account** — a dedicated read-only SQL login for the engine ingestion (parallel
    to `ssas_reader`), or is `sa` acceptable for the fixture?
+
+## Addendum — normative-spec probing (DISCOVER_CSDL_METADATA)
+
+Prompted by the normative references, probed the spec-defined metadata documents as the
+read-only user:
+
+- **`DISCOVER_CSDL_METADATA` — tabular: HTTP 200, reader-accessible.** Returns the model as
+  CSDL ([MS-CSDLBI]): `EntityType` per table, `Property` per column with **exact EDM types**
+  (Int64, String, Decimal — not OLE DB codes), measures as `bi:Measure`-annotated
+  properties, and `Association` elements for relationships. A system `RowNumber_*` column is
+  present and must be filtered.
+- **`DISCOVER_CSDL_METADATA` — multidimensional: FAULT** ("the current model can only be
+  expressed when the client is …"). CSDL is tabular-only.
+- **`DISCOVER_XML_METADATA`** answers on both but returns the ASSL server/DB envelope, not
+  per-object schema — not the extraction source.
+
+**Design revision (supersedes the MDSCHEMA-for-tabular note above):** tabular extraction
+uses `DISCOVER_CSDL_METADATA` ([MS-CSDLBI]); multidimensional uses `MDSCHEMA_*` ([MS-SSAS]).
+Both reader-accessible, both spec-defined. Integer enums from MDSCHEMA are mapped per
+[MS-SSAS-T].

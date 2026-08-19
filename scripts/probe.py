@@ -37,6 +37,13 @@ ENDPOINTS = {
 }
 
 # Discover requests keyed by RequestType (no catalog needed).
+# Catalog-scoped Discover requests (metadata documents), reader-accessible and
+# spec-defined: DISCOVER_CSDL_METADATA -> [MS-CSDLBI] tabular CSDL; XML_METADATA -> ASSL.
+DISCOVER_CATALOG_SCOPED = [
+    ("DISCOVER_CSDL_METADATA", "<CATALOG_NAME>{cat}</CATALOG_NAME>"),
+    ("DISCOVER_XML_METADATA", ""),
+]
+
 DISCOVER_ROWSETS = [
     "DISCOVER_DATASOURCES",
     "DBSCHEMA_CATALOGS",
@@ -61,7 +68,7 @@ DISCOVER_TMPL = (
     '<Envelope xmlns="{soap}"><Body>'
     '<Discover xmlns="{xmla}">'
     "<RequestType>{rtype}</RequestType>"
-    "<Restrictions><RestrictionList/></Restrictions>"
+    "<Restrictions><RestrictionList/></Restrictions>"  # restriction injected in probe_one when needed
     "<Properties><PropertyList>{props}</PropertyList></Properties>"
     "</Discover></Body></Envelope>"
 )
@@ -128,12 +135,13 @@ def send(session: requests.Session, url: str, body: str, action: str) -> request
     )
 
 
-def probe_one(session, base, label, mode, rowset, scrub, catalog=None):
+def probe_one(session, base, label, mode, rowset, scrub, catalog=None, restriction=""):
     """Run one probe; write scrubbed fixture; return (rowset, status)."""
     url = base + ENDPOINTS[label]
     props = f"<Catalog>{catalog}</Catalog>" if catalog else ""
     if mode == "discover":
         body = DISCOVER_TMPL.format(soap=SOAP_NS, xmla=XMLA_NS, rtype=rowset, props=props)
+        body = body.replace("<RestrictionList/>", f"<RestrictionList>{restriction}</RestrictionList>") if restriction else body
         action = "Discover"
     else:
         body = EXECUTE_TMPL.format(soap=SOAP_NS, xmla=XMLA_NS, rowset=rowset, props=props)
@@ -215,6 +223,11 @@ def main() -> int:
         # 1. Discover-by-RequestType rowsets (no catalog)
         for rs in DISCOVER_ROWSETS:
             results.append(probe_one(session, host, label, "discover", rs, scrub))
+
+        # 1b. catalog-scoped metadata documents (CSDL / XML), reader-accessible
+        for rs, restr in DISCOVER_CATALOG_SCOPED:
+            results.append(probe_one(session, host, label, "discover", rs, scrub,
+                                     catalog=cat, restriction=restr.format(cat=cat or "")))
 
         # 2. TMSCHEMA + MDSCHEMA families via Execute+Catalog on BOTH endpoints
         for rs in TMSCHEMA + MDSCHEMA:

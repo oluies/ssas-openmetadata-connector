@@ -1,50 +1,85 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+Sync Impact Report
+- Version change: (none) → 1.0.0  (initial ratification)
+- Principles defined: I No Secret Leakage; II Least Privilege; III Offline-First
+  Hermetic Tests; IV Discovery-Driven Modeling; V Spec-Driven with Review Gates
+- Added sections: Security & Data-Handling Constraints; Development Workflow & Quality Gates
+- Removed sections: none
+- Templates reviewed for alignment:
+    ✅ .specify/templates/plan-template.md  (Constitution Check gate references these principles)
+    ✅ .specify/templates/spec-template.md   (no mandatory-section conflicts)
+    ✅ .specify/templates/tasks-template.md   (test-discipline + review-gate task types covered)
+- Deferred TODOs: none
+-->
+
+# ssas-openmetadata-connector Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. No Secret Leakage (NON-NEGOTIABLE)
+Credentials, hostnames and IP addresses MUST come only from a gitignored `.env`. A
+credential, hostname, IP address, Windows SID or connection string MUST NEVER appear in
+any committed file, test fixture, log line or commit message. Every recorded XMLA fixture
+MUST be scrubbed of host, IP, username, machine/NetBIOS name, SID and connection-string
+fragments before it is written; the scrub is enforced in `scripts/probe.py` and MUST be
+re-verified (zero identifying tokens) whenever fixtures are regenerated. Rationale: the
+host is a shared, IP-allowlisted fixture reachable with plain-HTTP Basic auth; a leaked
+token or address is a real exposure, and fixtures are committed.
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### II. Least Privilege
+The connector MUST authenticate as a read-only account and MUST use only
+reader-accessible metadata interfaces (MDSCHEMA). It MUST NOT require, request or hold
+administrator credentials. TMSCHEMA and any other admin-gated rowset are out of scope.
+Rationale: discovery proved a read-only account faults on TMSCHEMA but has full MDSCHEMA
+access; holding admin credentials to gain marginal metadata is an unjustified risk.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### III. Offline-First Hermetic Tests (NON-NEGOTIABLE)
+Unit tests MUST run against the recorded fixture stub with sockets disabled and MUST NOT
+depend on the live host being reachable. The Hetzner host is for integration and
+acceptance runs only. A unit-test run MUST pass with no network. Rationale: the operator
+IP is allowlisted and changes; a suite that needs the host is not reproducible and blocks
+CI.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### IV. Discovery-Driven Modeling
+The connector MUST be modeled on observed XMLA behaviour captured under
+`tests/fixtures/xmla/`, not on assumptions. Where observed reality and any brief or
+document disagree, observed reality wins and the document is corrected. New behavioural
+assumptions MUST be backed by a fixture before code depends on them. Rationale: the
+original brief's central assumption (TMSCHEMA fallback) was wrong; only probing the real
+instance surfaced it.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### V. Spec-Driven with Review Gates
+Work MUST proceed through the spec-kit pipeline (constitution → specify → clarify → plan →
+tasks). Each implementation task MUST be committed on its own and reviewed by roborev,
+and the findings read, before the next task begins. Rationale: small reviewed increments
+catch defects early and keep the spec and code aligned.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+## Security & Data-Handling Constraints
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+- Secrets: `.env` only, gitignored; a committed `.env.example` carries placeholders.
+- OpenMetadata is pinned to **1.13.3**; the ingestion base image and compose MUST match.
+- SQL Server and Analysis Services are remote (Hetzner) and MUST NOT appear in any compose
+  file; only OpenMetadata, its datastore, its search backend and the connector run locally.
+- Transport to SSAS is plain-HTTP Basic auth to msmdpump; the connector MUST treat this as
+  untrusted and never log request bodies or auth headers.
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+## Development Workflow & Quality Gates
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+- The fixture stub (`docker/ssas-stub/`) serves recorded responses; unit tests target it
+  with sockets disabled.
+- Every commit is small and scoped to one task; `roborev review HEAD` + `roborev wait` run
+  after each, findings read before proceeding.
+- Regenerating fixtures MUST re-run the leak check; a non-zero identifying-token count is a
+  release blocker.
+- A change that weakens a NON-NEGOTIABLE principle MUST be rejected in review.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes other practices for this project. Amendments MUST be recorded
+in this file with a Sync Impact Report and a semantic-version bump: MAJOR for removing or
+redefining a principle, MINOR for adding a principle or materially expanding guidance,
+PATCH for clarifications. Every review MUST verify compliance with these principles;
+added complexity MUST be justified against them. Runtime development guidance for agents
+lives in `CLAUDE.md`.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2026-08-19 | **Last Amended**: 2026-08-19

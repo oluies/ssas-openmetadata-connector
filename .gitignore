@@ -15,3 +15,5 @@ venv/
 # local
 *.log
 .DS_Store
+# roborev snapshots
+/.roborev/
