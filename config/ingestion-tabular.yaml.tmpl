@@ -1,0 +1,27 @@
+# Tabular SSAS ingestion (milestone-1 DoD). Committed as a TEMPLATE — no secrets.
+# The run script substitutes ${...} from .env into a gitignored runtime copy.
+source:
+  type: customDatabase
+  serviceName: ssas_tabular
+  serviceConnection:
+    config:
+      type: CustomDatabase
+      sourcePythonClass: ssas_om.source.SsasSource
+      connectionOptions:
+        host: "${SSAS_HOST}"
+        endpoint: "/olap-tab/msmdpump.dll"
+        user: "${SSAS_USER}"
+        password: "${SSAS_PASSWORD}"
+        catalog: "AWTabular"
+  sourceConfig:
+    config:
+      type: DatabaseMetadata
+sink:
+  type: metadata-rest
+  config: {}
+workflowConfig:
+  openMetadataServerConfig:
+    hostPort: "http://openmetadata-server:8585/api"
+    authProvider: openmetadata
+    securityConfig:
+      jwtToken: "${OM_JWT_TOKEN}"

@@ -106,7 +106,7 @@ class SsasSource(Source):
             right=CreateDatabaseServiceRequest(
                 name=plan.service,
                 serviceType=DatabaseServiceType.CustomDatabase,
-                connection=self.config.serviceConnection,
+                connection=self.config.serviceConnection.root,
             )
         )
         db = f"{plan.service}.{plan.database}"

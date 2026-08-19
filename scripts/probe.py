@@ -68,7 +68,8 @@ DISCOVER_TMPL = (
     '<Envelope xmlns="{soap}"><Body>'
     '<Discover xmlns="{xmla}">'
     "<RequestType>{rtype}</RequestType>"
-    "<Restrictions><RestrictionList/></Restrictions>"  # restriction injected in probe_one when needed
+    # restriction injected in probe_one when needed:
+    "<Restrictions><RestrictionList/></Restrictions>"
     "<Properties><PropertyList>{props}</PropertyList></Properties>"
     "</Discover></Body></Envelope>"
 )
@@ -81,7 +82,7 @@ EXECUTE_TMPL = (
 )
 
 
-def _scrubber(host: str, user: str, machine: str | None = None) -> "callable":
+def _scrubber(host: str, user: str, machine: str | None = None) -> callable:
     """Return a function that removes identifying tokens from response text."""
     patterns: list[tuple[re.Pattern, str]] = []
     # explicit host (with/without scheme) and username
@@ -93,7 +94,7 @@ def _scrubber(host: str, user: str, machine: str | None = None) -> "callable":
     patterns.append((re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b"), "<IP>"))
     # Windows SIDs
     patterns.append((re.compile(r"S-1-(?:\d+-){1,}\d+"), "<SID>"))
-    # connection-string fragments (Data Source=..., Provider=..., etc. up to ;)
+    # connection-string fragments (leading keyword up to the next separator)
     patterns.append((re.compile(r"(?i)(Data Source|Provider|Initial Catalog|"
                                 r"User ID|Password|Server)=[^;<\"]*", ), r"\1=<SCRUBBED>"))
 
@@ -141,7 +142,10 @@ def probe_one(session, base, label, mode, rowset, scrub, catalog=None, restricti
     props = f"<Catalog>{catalog}</Catalog>" if catalog else ""
     if mode == "discover":
         body = DISCOVER_TMPL.format(soap=SOAP_NS, xmla=XMLA_NS, rtype=rowset, props=props)
-        body = body.replace("<RestrictionList/>", f"<RestrictionList>{restriction}</RestrictionList>") if restriction else body
+        if restriction:
+            body = body.replace(
+                "<RestrictionList/>", f"<RestrictionList>{restriction}</RestrictionList>"
+            )
         action = "Discover"
     else:
         body = EXECUTE_TMPL.format(soap=SOAP_NS, xmla=XMLA_NS, rowset=rowset, props=props)
@@ -149,8 +153,8 @@ def probe_one(session, base, label, mode, rowset, scrub, catalog=None, restricti
 
     try:
         r = send(session, url, body, action)
-    except requests.RequestException as e:
-        return rowset, f"transport-error"
+    except requests.RequestException:
+        return rowset, "transport-error"
 
     text = r.text
     fault = _fault(text)

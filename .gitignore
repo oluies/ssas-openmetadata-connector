@@ -17,3 +17,6 @@ venv/
 .DS_Store
 # roborev snapshots
 /.roborev/
+.run-ingestion.yaml
+docker/docker-volume/
+docker-volume/
