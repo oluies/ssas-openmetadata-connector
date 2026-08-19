@@ -115,3 +115,24 @@ read-only user:
 uses `DISCOVER_CSDL_METADATA` ([MS-CSDLBI]); multidimensional uses `MDSCHEMA_*` ([MS-SSAS]).
 Both reader-accessible, both spec-defined. Integer enums from MDSCHEMA are mapped per
 [MS-SSAS-T].
+
+## Addendum — MD cube → OpenMetadata representation (open decision)
+
+The clarify decision was to model the multidimensional cube as a **Dashboard
+DataModel**. Building it surfaced a constraint the decision was made without:
+`CreateDashboardDataModelRequest.dataModelType` is **required**, and the enum offers
+only vendor-specific values (`LookMlView`, `PowerBIDataModel`, `TableauDataModel`,
+`SupersetDataModel`, …). None represents an SSAS multidimensional cube, so any choice
+mislabels the asset.
+
+Options to resolve (needs a call):
+- **A. Pick the least-wrong type** (e.g. `PowerBIDataModel`) with a description noting it
+  is an SSAS cube. Fast, but misleading in the catalog.
+- **B. Model the cube as a Database service** (the clarify's alternative): measure groups
+  + dimensions → tables, attributes/measures → columns. Reuses the verified tabular
+  emission path, fits cleanly, no misrepresentation. **Recommended.**
+- **C. Custom entity type** via OM schema extension. Most faithful, most work.
+
+The MDSCHEMA parser (`mdschema.py`) and cube mapper (`mapper_cube.py`) are implemented and
+tested; only the emission target is blocked on this decision. Tabular ingestion + lineage
+(the milestone) are complete and unaffected.
