@@ -17,7 +17,7 @@ integration only.
 
 - **Language**: Python 3.10 (matches the OpenMetadata 1.13.3 ingestion base image).
 - **Core deps**: `openmetadata-ingestion==1.13.3.*` (SDK + entities), `requests` (XMLA over
-  HTTP Basic), stdlib `xml.etree`/`lxml` for CSDL + XMLA rowset parsing.
+  HTTP Basic), stdlib `xml.etree` for CSDL + XMLA parsing (lxml is dev-only, for fixture tooling).
 - **Test deps**: `pytest`, `pytest-socket` (disable sockets in unit tests), `responses` or a
   local stub server for the fixture stub.
 - **Metadata sources** (reader-accessible, spec-defined):

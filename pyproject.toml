@@ -4,17 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ssas-om-connector"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Read-only OpenMetadata ingestion connector for SQL Server Analysis Services (tabular via CSDL, multidimensional via MDSCHEMA)"
 requires-python = ">=3.10"
 dependencies = [
   "requests>=2.31",
+  "openmetadata-ingestion==1.13.3.*",
 ]
 
 [project.optional-dependencies]
-# The OpenMetadata SDK is heavy and only needed by the mappers/source (T010+).
-# Kept optional so parser/enum/redact tests run without it.
-openmetadata = ["openmetadata-ingestion==1.13.3.*"]
 # SQL Server engine ingestion (T014) uses pymssql — pure-Python, no system ODBC driver.
 mssql = ["pymssql>=2.2"]
 dev = [
@@ -24,6 +22,9 @@ dev = [
   "ruff>=0.6",
   "mypy>=1.11",
 ]
+
+[tool.hatch.version]
+path = "src/ssas_om/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ssas_om"]
@@ -42,4 +43,5 @@ files = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --disable-socket --allow-unix-socket"
+pythonpath = ["src"]

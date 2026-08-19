@@ -81,3 +81,11 @@ stories: P1 tabular (DoD), P2 MSSQL lineage source, P3 MD cube.
 T001–T008, T010, T012, T013, T015, T017 complete → `docker compose up -d` + one tabular
 ingestion shows the tabular model's tables and columns in OpenMetadata; unit tests pass
 with sockets disabled. (T009/T011 MD and T014/T016 lineage may trail into M2.)
+
+## Future work (out of this spec)
+
+- **Custom SQL Server connector** built on DuckDB + `hugr-lab/mssql-extension` (native TDS,
+  strong Azure AD support: service principal / CLI / device code). Built *after* the SSAS
+  connector as its own feature. M1 keeps OpenMetadata's built-in MSSQL connector (pymssql)
+  for the lineage source; this future connector would target Azure SQL / AAD scenarios where
+  the extension's auth story beats ODBC.
