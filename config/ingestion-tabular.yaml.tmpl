@@ -13,6 +13,10 @@ source:
         user: "${SSAS_USER}"
         password: "${SSAS_PASSWORD}"
         catalog: "AWTabular"
+        # table-level lineage to the SQL source ingested by ingestion-mssql.yaml
+        lineageService: "hetzner_mssql"
+        lineageDatabase: "AdventureWorksDW2022"
+        lineageSchema: "dbo"
   sourceConfig:
     config:
       type: DatabaseMetadata

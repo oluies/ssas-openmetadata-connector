@@ -19,16 +19,19 @@ from metadata.generated.schema.api.data.createDatabaseSchema import (
     CreateDatabaseSchemaRequest,
 )
 from metadata.generated.schema.api.data.createTable import CreateTableRequest
+from metadata.generated.schema.api.lineage.addLineage import AddLineageRequest
 from metadata.generated.schema.api.services.createDatabaseService import (
     CreateDatabaseServiceRequest,
 )
-from metadata.generated.schema.entity.data.table import Column, DataType
+from metadata.generated.schema.entity.data.table import Column, DataType, Table
 from metadata.generated.schema.entity.services.databaseService import (
     DatabaseServiceType,
 )
 from metadata.generated.schema.metadataIngestion.workflow import (
     Source as WorkflowSource,
 )
+from metadata.generated.schema.type.entityLineage import EntitiesEdge
+from metadata.generated.schema.type.entityReference import EntityReference
 from metadata.ingestion.api.common import Entity
 from metadata.ingestion.api.models import Either
 from metadata.ingestion.api.steps import Source
@@ -61,6 +64,10 @@ class SsasSource(Source):
         self.host = str(opts["host"]).rstrip("/")
         self.endpoint = str(opts["endpoint"])
         self.catalog_opt = opts.get("catalog")
+        # optional table-level lineage target (the SQL source ingested separately)
+        self.lineage_service = opts.get("lineageService")
+        self.lineage_database = opts.get("lineageDatabase")
+        self.lineage_schema = opts.get("lineageSchema", "dbo")
         self.service_name = config.serviceName
         self.client = XmlaClient(
             url=self.host + self.endpoint,
@@ -111,6 +118,7 @@ class SsasSource(Source):
                 yield self._service_request()
                 emitted_service = True
             yield from self._emit_database(plan)
+            yield from self._emit_lineage(plan)
 
     def _service_request(self) -> Either[Entity]:
         return Either(
@@ -142,6 +150,30 @@ class SsasSource(Source):
                             )
                             for c in table.columns
                         ],
+                    )
+                )
+
+    def _emit_lineage(self, plan: ServicePlan) -> Iterable[Either[Entity]]:
+        """Table-level lineage: SQL source table -> matching SSAS table (by name)."""
+        if not (self.lineage_service and self.lineage_database):
+            return
+        for schema in plan.schemas:
+            for table in schema.tables:
+                src_fqn = (
+                    f"{self.lineage_service}.{self.lineage_database}."
+                    f"{self.lineage_schema}.{table.name}"
+                )
+                dst_fqn = f"{plan.service}.{plan.database}.{schema.name}.{table.name}"
+                src = self.metadata.get_by_name(entity=Table, fqn=src_fqn)
+                dst = self.metadata.get_by_name(entity=Table, fqn=dst_fqn)
+                if src is None or dst is None:
+                    continue
+                yield Either(
+                    right=AddLineageRequest(
+                        edge=EntitiesEdge(
+                            fromEntity=EntityReference(id=src.id, type="table"),
+                            toEntity=EntityReference(id=dst.id, type="table"),
+                        )
                     )
                 )
 

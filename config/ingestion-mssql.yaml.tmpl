@@ -1,0 +1,30 @@
+# MSSQL engine ingestion (T014) — the lineage target (AdventureWorksDW2022).
+# Built-in OpenMetadata MSSQL connector via pymssql (pure-Python, no ODBC driver).
+# Committed as a TEMPLATE — no secrets; run script substitutes from .env.
+source:
+  type: mssql
+  serviceName: hetzner_mssql
+  serviceConnection:
+    config:
+      type: Mssql
+      scheme: mssql+pymssql
+      username: "${MSSQL_USER}"
+      password: "${MSSQL_PASSWORD}"
+      hostPort: "${MSSQL_HOST}:1433"
+      database: "AdventureWorksDW2022"
+  sourceConfig:
+    config:
+      type: DatabaseMetadata
+      includeTables: true
+      includeViews: true
+      schemaFilterPattern:
+        includes: ["dbo"]
+sink:
+  type: metadata-rest
+  config: {}
+workflowConfig:
+  openMetadataServerConfig:
+    hostPort: "http://openmetadata-server:8585/api"
+    authProvider: openmetadata
+    securityConfig:
+      jwtToken: "${OM_JWT_TOKEN}"

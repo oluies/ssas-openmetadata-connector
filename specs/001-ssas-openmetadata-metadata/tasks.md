@@ -53,7 +53,7 @@ stories: P1 tabular (DoD), P2 MSSQL lineage source, P3 MD cube.
 
 - **T013** `docker/compose.yml`: OpenMetadata 1.13.3 server + datastore + search + the
   connector image from the ingestion base. No SQL/SSAS services. `.env`-driven.
-- **T014** MSSQL service registration (P2): built-in MSSQL connector config for
+- **T014** [DONE] MSSQL service registration (P2): built-in MSSQL connector config for
   AdventureWorksDW2022 (creds from `.env`) using the **pymssql** scheme (pure-Python, no
   system ODBC driver; DuckDB rejected — architectural mismatch with OM ingestion);
   documented run. Table-level lineage target.
@@ -63,7 +63,7 @@ stories: P1 tabular (DoD), P2 MSSQL lineage source, P3 MD cube.
 
 ## Phase 5 — Lineage & verification
 
-- **T016** (P2) Table-level SSAS→MSSQL lineage: link each tabular table to its
+- **T016** [DONE] (P2) Table-level SSAS→MSSQL lineage: link each tabular table to its
   AdventureWorksDW source table (names align: DimProduct, FactInternetSales).
 - **T017** Acceptance: scripted check that after `up -d` + tabular run, the OM API shows the
   service, tables and columns (SC-001); unit suite green with sockets disabled (SC-002);

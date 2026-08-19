@@ -18,7 +18,7 @@ umask 077
 # JWT for the local ingestion-bot (fetched by the caller into OM_JWT_TOKEN)
 : "${OM_JWT_TOKEN:?set OM_JWT_TOKEN (see scripts/om-jwt.sh)}"
 
-envsubst '${SSAS_HOST} ${SSAS_USER} ${SSAS_PASSWORD} ${OM_JWT_TOKEN}' < "$TMPL" > "$RUNTIME"
+envsubst '${SSAS_HOST} ${SSAS_USER} ${SSAS_PASSWORD} ${MSSQL_HOST} ${MSSQL_USER} ${MSSQL_PASSWORD} ${OM_JWT_TOKEN}' < "$TMPL" > "$RUNTIME"
 
 if [ -n "${OM_NETWORK:-}" ]; then
   NET="$OM_NETWORK"
@@ -31,9 +31,9 @@ else
     exit 1
   fi
 fi
-docker run --rm --network "$NET" \
+docker run --rm --network "$NET" --entrypoint metadata \
   -v "$PWD/src:/opt/connector:ro" \
   -v "$PWD/$RUNTIME:/ingest.yaml:ro" \
   -e PYTHONPATH=/opt/connector \
   docker.getcollate.io/openmetadata/ingestion:1.13.3 \
-  metadata ingest -c /ingest.yaml
+  ingest -c /ingest.yaml
