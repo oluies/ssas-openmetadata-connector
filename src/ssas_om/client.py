@@ -106,3 +106,24 @@ class XmlaClient:
     def _fault(self, text: str) -> str | None:
         m = _FAULT.search(text) or _DESC.search(text)
         return self._scrub(m.group(1).strip())[:300] if m else None
+
+
+def parse_rowset(text: str) -> list[dict[str, str]]:
+    """Parse an XMLA rowset response into a list of {column: value} dicts.
+
+    Handles the default `...:rowset` namespace by matching on local element names.
+    """
+    import xml.etree.ElementTree as ET
+
+    def local(tag: str) -> str:
+        return tag.rsplit("}", 1)[-1]
+
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return []
+    rows: list[dict[str, str]] = []
+    for el in root.iter():
+        if local(el.tag) == "row":
+            rows.append({local(c.tag): (c.text or "") for c in el})
+    return rows
