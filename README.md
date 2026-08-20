@@ -103,10 +103,48 @@ into a `0600`, auto-deleted runtime file.
 
 ### Security models
 
-`basic` (HTTP Basic) is built in. **Kerberos / Negotiate / NTLM** are supported via optional
-extras — `pip install 'ssas-om-connector[kerberos]'` (or `[ntlm]`) — and selected with
-`authMechanism`. Kerberos additionally needs a ticket cache (or a Windows/SSPI host) in the
-runtime that executes the ingestion. See [`ARCHITECTURE.md`](ARCHITECTURE.md#authentication).
+`basic` (HTTP Basic) is built in and needs no extra dependency. **Kerberos / Negotiate /
+NTLM** are supported through `authMechanism`, but they are *not* just a setting — the
+ingestion runtime must be prepared for them. The connector runs inside the Linux
+OpenMetadata ingestion image, so it authenticates with a **Kerberos keytab/ticket**, not the
+logged-in Windows identity (true Windows SSPI works only if the connector runs on Windows).
+
+**Using Kerberos (Windows integrated auth) against `msmdpump`:**
+
+1. **SSAS side** — configure the `/olap-tab` (and `/olap-md`) IIS applications for **Windows
+   Authentication** (Negotiate/Kerberos) instead of Basic, and register an SPN for the host,
+   e.g. `setspn -S HTTP/ssas-host.domain.com DOMAIN\svc_account`.
+2. **Install the extra in the runtime.** In your derived ingestion image:
+   ```dockerfile
+   FROM docker.getcollate.io/openmetadata/ingestion:1.13.3
+   RUN pip install 'ssas-om-connector[kerberos]'   # requests-kerberos + gssapi
+   ```
+3. **Provide Kerberos config and credentials** to that container: mount `/etc/krb5.conf` for
+   your realm plus a **keytab**, and obtain a ticket before the run
+   (`kinit -kt /etc/krb5.keytab svc_account@DOMAIN.COM`), or run under a valid `KRB5CCNAME`
+   ticket cache. For NTLM instead: `pip install 'ssas-om-connector[ntlm]'` and pass the
+   Windows `user`/`password` in `DOMAIN\user` form.
+4. **Set the option** in the ingestion config:
+   ```yaml
+   connectionOptions:
+     authMechanism: kerberos      # or: negotiate | ntlm | basic
+     host: "https://ssas-host.domain.com"   # HTTPS for integrated auth
+     endpoint: "/olap-tab/msmdpump.dll"
+     user: "svc_account"          # used by ntlm; ignored by kerberos ticket auth
+     password: "..."
+   ```
+
+Requesting `kerberos`/`ntlm` without the matching extra installed raises a clear error naming
+the missing extra. The connector never logs request bodies or the `Authorization` header.
+Basic over plain HTTP sends credentials in clear text — use it only behind a network
+firewall, or put HTTPS in front. The MSSQL lineage source is a separate built-in
+OpenMetadata connector (`pymssql`) with its own auth settings.
+
+> Status: the `basic` path is validated end-to-end against a live instance. The
+> `kerberos`/`negotiate`/`ntlm` selection logic is unit-tested, but end-to-end validation
+> needs a Windows-authenticated SSAS endpoint (the reference fixture uses Basic).
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md#authentication) for the diagram.
 
 ## Testing
 
