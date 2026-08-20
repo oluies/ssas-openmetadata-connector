@@ -1,5 +1,14 @@
 # SSAS → OpenMetadata connector
 
+[![CI](https://github.com/oluies/ssas-openmetadata-connector/actions/workflows/ci.yml/badge.svg?branch=001-ssas-openmetadata-metadata)](https://github.com/oluies/ssas-openmetadata-connector/actions/workflows/ci.yml)
+[![Secret scan](https://github.com/oluies/ssas-openmetadata-connector/actions/workflows/secret-scan.yml/badge.svg?branch=001-ssas-openmetadata-metadata)](https://github.com/oluies/ssas-openmetadata-connector/actions/workflows/secret-scan.yml)
+![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)
+![OpenMetadata](https://img.shields.io/badge/OpenMetadata-1.13.3-1890ff)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
+![Checked with ty](https://img.shields.io/badge/types-ty-261230)
+
+
 A read-only [OpenMetadata](https://open-metadata.org) ingestion connector for **SQL
 Server Analysis Services**, over XMLA/HTTP (`msmdpump`). It ingests both model kinds as
 database services and links them to their relational source for lineage:
