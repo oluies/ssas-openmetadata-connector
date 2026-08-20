@@ -51,11 +51,42 @@ class XmlaResult:
         return self.status == 200 and self.fault is None
 
 
-def _requests_transport(url: str, user: str, password: str) -> Transport:
+def _requests_auth(mechanism: str, user: str, password: str):
+    """Build a requests auth handler for the SSAS msmdpump IIS endpoint.
+
+    Supported: 'basic' (default). 'kerberos'/'negotiate' and 'ntlm' require optional
+    extras (installed via the connector's [kerberos]/[ntlm] extras); Windows SSPI
+    Negotiate additionally needs a Windows host or a Kerberos ticket cache.
+    """
+    mech = (mechanism or "basic").lower()
+    if mech == "basic":
+        return (user, password)
+    if mech in ("kerberos", "negotiate"):
+        try:
+            from requests_kerberos import OPTIONAL, HTTPKerberosAuth
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError(
+                "authMechanism='kerberos' needs the extra: pip install '...[kerberos]'"
+            ) from exc
+        return HTTPKerberosAuth(mutual_authentication=OPTIONAL)
+    if mech == "ntlm":
+        try:
+            from requests_ntlm import HttpNtlmAuth
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            raise RuntimeError(
+                "authMechanism='ntlm' needs the extra: pip install '...[ntlm]'"
+            ) from exc
+        return HttpNtlmAuth(user, password)
+    raise ValueError(f"unknown authMechanism: {mechanism!r}")
+
+
+def _requests_transport(
+    url: str, user: str, password: str, auth_mechanism: str = "basic"
+) -> Transport:
     import requests  # imported lazily so parser tests need no network stack
 
     session = requests.Session()
-    session.auth = (user, password)
+    session.auth = _requests_auth(auth_mechanism, user, password)
 
     def _send(u: str, body: str, action: str) -> tuple[int, str]:
         r = session.post(
@@ -77,10 +108,13 @@ class XmlaClient:
         user: str,
         password: str,
         transport: Transport | None = None,
+        auth_mechanism: str = "basic",
     ) -> None:
         self._url = url
         self._scrub = make_scrubber(host=urlsplit(url).hostname or url, user=user)
-        self._transport = transport or _requests_transport(url, user, password)
+        self._transport = transport or _requests_transport(
+            url, user, password, auth_mechanism
+        )
 
     # -- public API -----------------------------------------------------------------
     def discover(

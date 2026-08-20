@@ -35,3 +35,12 @@ def test_csdl_discover_ok(fixture_xml):
                    restrictions="<CATALOG_NAME>AWTabular</CATALOG_NAME>")
     assert r.ok
     assert "EntityType" in r.text
+
+
+def test_auth_mechanism_selection():
+    import pytest as _pytest
+
+    from ssas_om.client import _requests_auth
+    assert _requests_auth("basic", "u", "p") == ("u", "p")
+    with _pytest.raises(ValueError):
+        _requests_auth("saml", "u", "p")

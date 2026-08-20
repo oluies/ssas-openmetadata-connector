@@ -78,6 +78,7 @@ class SsasSource(Source):
             url=self.host + self.endpoint,
             user=str(opts["user"]),
             password=str(opts["password"]),
+            auth_mechanism=str(opts.get("authMechanism", "basic")),
         )
 
     @classmethod
