@@ -153,6 +153,11 @@ Only **tabular** tables are sampled (a multidimensional MDX sampler is a follow-
 `RowNumber` system column is dropped, and a failed sample query never fails the run — it is
 logged and skipped. Sampling reads live data, so leave it off for sensitive models.
 
+![The DimProduct Sample Data tab in OpenMetadata, 50 rows of ProductKey / EnglishProductName](docs/images/openmetadata-sample-data.png)
+
+> Status: validated end-to-end against the live SSAS instance — `EVALUATE TOPN(50, ...)`
+> sample rows for the tabular tables land in each table's **Sample Data** tab.
+
 For the **relational** source, row sampling and column statistics come from OpenMetadata's
 own **profiler** workflow (a separate `type: Profiler` run over the `hetzner_mssql` service),
 toggled with `generateSampleData` — see `config/ingestion-mssql.yaml.tmpl`.
