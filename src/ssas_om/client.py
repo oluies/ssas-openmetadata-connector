@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urlsplit
 from xml.sax.saxutils import escape
 
@@ -51,7 +52,7 @@ class XmlaResult:
         return self.status == 200 and self.fault is None
 
 
-def _requests_auth(mechanism: str, user: str, password: str):
+def _requests_auth(mechanism: str, user: str, password: str) -> Any:
     """Build a requests auth handler for the SSAS msmdpump IIS endpoint.
 
     Supported: 'basic' (default). 'kerberos'/'negotiate' and 'ntlm' require optional
