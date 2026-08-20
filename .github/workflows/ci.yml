@@ -23,7 +23,7 @@ jobs:
       - name: ruff (Astral linter)
         run: uvx ruff@latest check .
       - name: ty (Astral type checker; SDK-free core, source.py is the SDK boundary)
-        run: uvx ty@0.0.73 check
+        run: uvx --with requests ty@0.0.73 check
 
   test-offline:
     name: offline unit tests (py ${{ matrix.python-version }})
