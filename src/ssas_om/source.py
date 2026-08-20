@@ -1,12 +1,12 @@
 """OpenMetadata custom Source connector for SSAS (T012).
 
 Wires XMLA client -> classify -> parse (CSDL tabular / MDSCHEMA cube) -> plan ->
-OpenMetadata entities. Tabular catalogs are emitted as a database service (the
-milestone-1 target); multidimensional catalogs as a dashboard service.
+OpenMetadata entities. Both tabular catalogs and multidimensional cubes are emitted
+as database services (option B — see docs/discovery-report.md).
 
-Configured via a `customDatabase`/`customDashboard` source whose `connectionOptions`
-carry: host, endpoint, user, password and (optionally) catalog. No admin-gated
-(TMSCHEMA) request is ever issued.
+Configured via a `customDatabase` source whose `connectionOptions` carry: host,
+endpoint, user, password and (optionally) catalog. No admin-gated (TMSCHEMA)
+request is ever issued.
 """
 from __future__ import annotations
 
@@ -36,14 +36,17 @@ from metadata.ingestion.api.common import Entity
 from metadata.ingestion.api.models import Either
 from metadata.ingestion.api.steps import Source
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
+from metadata.utils.logger import ingestion_logger
 
 from .classify import Catalog, list_catalogs
 from .client import XmlaClient
 from .csdl import parse_csdl
-from .mapper_cube import plan_cube
+from .mapper_cube import plan_cubes
 from .mapper_tabular import plan_tabular
-from .mdschema import build_cube_from_client
+from .mdschema import build_cubes_from_client
 from .plan import ServicePlan
+
+logger = ingestion_logger()
 
 _FALLBACK_TYPE = DataType.VARCHAR if hasattr(DataType, "VARCHAR") else DataType.STRING
 
@@ -132,10 +135,10 @@ class SsasSource(Source):
         return plan
 
     def _plan_cube_catalog(self, cat: Catalog) -> ServicePlan | None:
-        cube = build_cube_from_client(self.client, cat.name)
-        if not cube.name:
+        cubes = build_cubes_from_client(self.client, cat.name)
+        if not cubes:
             return None
-        return plan_cube(cube, service=self.service_name, database=cat.name)
+        return plan_cubes(cubes, service=self.service_name, database=cat.name)
 
     def _service_request(self) -> Either[Entity]:
         return Either(
@@ -184,6 +187,8 @@ class SsasSource(Source):
                 src = self.metadata.get_by_name(entity=Table, fqn=src_fqn)
                 dst = self.metadata.get_by_name(entity=Table, fqn=dst_fqn)
                 if src is None or dst is None:
+                    missing = src_fqn if src is None else dst_fqn
+                    logger.warning("lineage skipped: table not found in catalog: %s", missing)
                     continue
                 yield Either(
                     right=AddLineageRequest(

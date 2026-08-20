@@ -31,7 +31,7 @@ class SchemaPlan:
 @dataclass
 class ServicePlan:
     service: str            # OpenMetadata service name
-    service_type: str       # "database" | "dashboard"
+    service_type: str       # "database" (reserved for future non-database targets)
     database: str
     schemas: list[SchemaPlan] = field(default_factory=list)
 

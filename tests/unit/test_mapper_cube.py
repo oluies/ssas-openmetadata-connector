@@ -7,7 +7,7 @@ def test_plan_cube_from_md_fixtures(fixture_xml):
         return fixture_xml("md", n)
 
     cube = build_cube(
-        f("execute.MDSCHEMA_CUBES"), f("execute.MDSCHEMA_MEASUREGROUPS"),
+        "AWCube", f("execute.MDSCHEMA_MEASUREGROUPS"),
         f("execute.MDSCHEMA_DIMENSIONS"), f("execute.MDSCHEMA_LEVELS"),
         f("execute.MDSCHEMA_MEASURES"),
     )

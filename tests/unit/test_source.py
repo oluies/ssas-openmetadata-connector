@@ -119,3 +119,49 @@ def test_iter_multidimensional_emits_database_from_cube():
     assert kinds.count("CreateDatabaseServiceRequest") == 1
     tables = {e.name.root for e in entities if type(e).__name__ == "CreateTableRequest"}
     assert "Product" in tables and "Measures" in tables
+
+
+def test_iter_emits_lineage_edges_sql_to_ssas():
+    import uuid
+    config = {
+        "type": "customDatabase",
+        "serviceName": "ssas_tabular",
+        "serviceConnection": {"config": {
+            "type": "CustomDatabase",
+            "sourcePythonClass": "ssas_om.source.SsasSource",
+            "connectionOptions": {
+                "host": "http://ssas.internal", "endpoint": "/olap-tab/msmdpump.dll",
+                "user": "reader", "password": "pw", "catalog": "AWTabular",
+                "lineageService": "hetzner_mssql",
+                "lineageDatabase": "AdventureWorksDW2022",
+                "lineageSchema": "dbo",
+            },
+        }},
+        "sourceConfig": {"config": {"type": "DatabaseMetadata"}},
+    }
+    fqn_to_id: dict[str, uuid.UUID] = {}
+
+    def get_by_name(entity, fqn):
+        m = MagicMock()
+        m.id = fqn_to_id.setdefault(fqn, uuid.uuid4())
+        return m
+
+    md = MagicMock()
+    md.get_by_name.side_effect = get_by_name
+    src = SsasSource.create(config, md)
+    src.client = XmlaClient("http://ssas.internal/olap-tab/msmdpump.dll",
+                            "reader", "pw", transport=_fixture_transport)
+
+    edges = [e.right for e in src._iter()
+             if e.right is not None and type(e.right).__name__ == "AddLineageRequest"]
+    assert len(edges) == 2  # DimProduct, FactInternetSales
+
+    def uid(x):
+        return str(x.root if hasattr(x, "root") else x)
+
+    got = {(uid(e.edge.fromEntity.id), uid(e.edge.toEntity.id)) for e in edges}
+    for tbl in ("DimProduct", "FactInternetSales"):
+        sql = fqn_to_id[f"hetzner_mssql.AdventureWorksDW2022.dbo.{tbl}"]
+        ssas = fqn_to_id[f"ssas_tabular.AWTabular.Model.{tbl}"]
+        # edge direction is SQL source -> SSAS target
+        assert (str(sql), str(ssas)) in got

@@ -12,9 +12,8 @@ from . import mdschema
 from .plan import ColumnPlan, SchemaPlan, ServicePlan, TablePlan
 
 
-def plan_cube(cube: mdschema.Cube, service: str, database: str) -> ServicePlan:
-    # Each dimension becomes a "table" (data-model entity) of its attribute columns;
-    # a synthetic Measures table holds the visible measures.
+def cube_schema(cube: mdschema.Cube) -> SchemaPlan:
+    """One cube -> one schema: dimensions + a synthetic Measures table."""
     tables: list[TablePlan] = []
     for dim in cube.dimensions:
         tables.append(
@@ -34,9 +33,14 @@ def plan_cube(cube: mdschema.Cube, service: str, database: str) -> ServicePlan:
                 ],
             )
         )
-    return ServicePlan(
-        service=service,
-        service_type="database",
-        database=database,
-        schemas=[SchemaPlan(name=cube.name, tables=tables)],
-    )
+    return SchemaPlan(name=cube.name, tables=tables)
+
+
+def plan_cube(cube: mdschema.Cube, service: str, database: str) -> ServicePlan:
+    return ServicePlan(service=service, service_type="database",
+                       database=database, schemas=[cube_schema(cube)])
+
+
+def plan_cubes(cubes: list[mdschema.Cube], service: str, database: str) -> ServicePlan:
+    return ServicePlan(service=service, service_type="database", database=database,
+                       schemas=[cube_schema(c) for c in cubes])

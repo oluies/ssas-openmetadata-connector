@@ -1,7 +1,9 @@
 """MDSCHEMA rowset parser for multidimensional models ([MS-SSAS]).
 
-Reader-accessible metadata: cube, measure groups, dimensions, measures, and the
+Reader-accessible metadata: cubes, measure groups, dimensions, measures, and the
 attribute columns (from hierarchies/levels). Integer enums are mapped via `enums`.
+A catalog may expose several cubes (and system perspectives), so rows are filtered
+to real cubes and scoped by CUBE_NAME.
 """
 from __future__ import annotations
 
@@ -41,14 +43,25 @@ class Cube:
     measures: list[MdMeasure] = field(default_factory=list)
 
 
-def _cube_name(text: str) -> str:
-    rows = parse_rowset(text)
-    return rows[0].get("CUBE_NAME", "") if rows else ""
+def list_cube_names(cubes_text: str) -> list[str]:
+    """Real cubes only: skip system perspectives ($-prefixed) and non-cube sources."""
+    names: list[str] = []
+    for r in parse_rowset(cubes_text):
+        name = r.get("CUBE_NAME", "")
+        # CUBE_SOURCE: 1 = CUBE (not a dimension/perspective source)
+        source = r.get("CUBE_SOURCE", "1")
+        if name and not name.startswith("$") and source in ("1", ""):
+            names.append(name)
+    return names
 
 
-def parse_measures(text: str) -> list[MdMeasure]:
+def _for_cube(rows: list[dict[str, str]], cube_name: str) -> list[dict[str, str]]:
+    return [r for r in rows if r.get("CUBE_NAME", cube_name) == cube_name]
+
+
+def parse_measures(text: str, cube_name: str) -> list[MdMeasure]:
     out = []
-    for r in parse_rowset(text):
+    for r in _for_cube(parse_rowset(text), cube_name):
         out.append(
             MdMeasure(
                 name=r.get("MEASURE_NAME", ""),
@@ -60,10 +73,9 @@ def parse_measures(text: str) -> list[MdMeasure]:
     return out
 
 
-def parse_dimensions(dims_text: str, levels_text: str) -> list[MdDimension]:
-    # columns come from MDSCHEMA_LEVELS grouped by dimension, typed via LEVEL_DBTYPE
+def parse_dimensions(dims_text: str, levels_text: str, cube_name: str) -> list[MdDimension]:
     cols_by_dim: dict[str, list[MdColumn]] = {}
-    for r in parse_rowset(levels_text):
+    for r in _for_cube(parse_rowset(levels_text), cube_name):
         dim = r.get("DIMENSION_UNIQUE_NAME", "")
         name = r.get("LEVEL_NAME", "")
         if not name or name == "(All)":
@@ -72,14 +84,13 @@ def parse_dimensions(dims_text: str, levels_text: str) -> list[MdDimension]:
             MdColumn(name=name, om_type=oledb_to_om_type(r.get("LEVEL_DBTYPE")))
         )
     dims = []
-    for r in parse_rowset(dims_text):
+    for r in _for_cube(parse_rowset(dims_text), cube_name):
         uniq = r.get("DIMENSION_UNIQUE_NAME", "")
-        dtype = dimension_type_name(r.get("DIMENSION_TYPE"))
         dims.append(
             MdDimension(
                 name=r.get("DIMENSION_NAME", ""),
                 unique_name=uniq,
-                dtype=dtype,
+                dtype=dimension_type_name(r.get("DIMENSION_TYPE")),
                 columns=cols_by_dim.get(uniq, []),
             )
         )
@@ -87,23 +98,28 @@ def parse_dimensions(dims_text: str, levels_text: str) -> list[MdDimension]:
 
 
 def build_cube(
-    cubes_text: str, mg_text: str, dims_text: str, levels_text: str, measures_text: str
+    cube_name: str, mg_text: str, dims_text: str, levels_text: str, measures_text: str
 ) -> Cube:
     return Cube(
-        name=_cube_name(cubes_text),
-        measure_groups=[r.get("MEASUREGROUP_NAME", "") for r in parse_rowset(mg_text)],
-        dimensions=[d for d in parse_dimensions(dims_text, levels_text)
+        name=cube_name,
+        measure_groups=[
+            r.get("MEASUREGROUP_NAME", "") for r in _for_cube(parse_rowset(mg_text), cube_name)
+        ],
+        dimensions=[d for d in parse_dimensions(dims_text, levels_text, cube_name)
                     if d.dtype != "Measure"],
-        measures=[m for m in parse_measures(measures_text) if m.visible],
+        measures=[m for m in parse_measures(measures_text, cube_name) if m.visible],
     )
 
 
-def build_cube_from_client(client: XmlaClient, catalog: str) -> Cube:
+def build_cubes_from_client(client: XmlaClient, catalog: str) -> list[Cube]:
     def dmv(rowset: str) -> str:
         r = client.dmv(rowset, catalog=catalog)
         return r.text if r.ok else "<empty/>"
 
-    return build_cube(
-        dmv("MDSCHEMA_CUBES"), dmv("MDSCHEMA_MEASUREGROUPS"),
-        dmv("MDSCHEMA_DIMENSIONS"), dmv("MDSCHEMA_LEVELS"), dmv("MDSCHEMA_MEASURES"),
+    cubes_text = dmv("MDSCHEMA_CUBES")
+    mg, dims, levels, measures = (
+        dmv("MDSCHEMA_MEASUREGROUPS"), dmv("MDSCHEMA_DIMENSIONS"),
+        dmv("MDSCHEMA_LEVELS"), dmv("MDSCHEMA_MEASURES"),
     )
+    return [build_cube(name, mg, dims, levels, measures)
+            for name in list_cube_names(cubes_text)]

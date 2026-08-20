@@ -6,8 +6,11 @@ def _f(fx, name):
 
 
 def test_build_cube_from_md_fixtures(fixture_xml):
+    from ssas_om.mdschema import list_cube_names
+    names = list_cube_names(_f(fixture_xml, "execute.MDSCHEMA_CUBES"))
+    assert names == ["AWCube"]
     cube = build_cube(
-        _f(fixture_xml, "execute.MDSCHEMA_CUBES"),
+        "AWCube",
         _f(fixture_xml, "execute.MDSCHEMA_MEASUREGROUPS"),
         _f(fixture_xml, "execute.MDSCHEMA_DIMENSIONS"),
         _f(fixture_xml, "execute.MDSCHEMA_LEVELS"),
