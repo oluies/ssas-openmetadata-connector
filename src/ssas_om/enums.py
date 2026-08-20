@@ -14,8 +14,10 @@ CATALOG_KIND = {0: "multidimensional", 3: "tabular"}
 
 
 def catalog_kind(type_code: int | str | None) -> str:
+    if type_code is None:
+        return "unknown"
     try:
-        return CATALOG_KIND.get(int(type_code), "unknown")  # type: ignore[arg-type]
+        return CATALOG_KIND.get(int(type_code), "unknown")
     except (TypeError, ValueError):
         return "unknown"
 
@@ -36,8 +38,10 @@ OM_DEFAULT_TYPE = "STRING"  # safe fallback for an unknown code (FR-008)
 
 
 def oledb_to_om_type(code: int | str | None) -> str:
+    if code is None:
+        return OM_DEFAULT_TYPE
     try:
-        return _OLEDB_TO_OM.get(int(code), OM_DEFAULT_TYPE)  # type: ignore[arg-type]
+        return _OLEDB_TO_OM.get(int(code), OM_DEFAULT_TYPE)
     except (TypeError, ValueError):
         return OM_DEFAULT_TYPE
 
@@ -65,8 +69,10 @@ MEASURE_AGGREGATOR = {
 
 
 def aggregator_name(code: int | str | None) -> str:
+    if code is None:
+        return "Unknown"
     try:
-        return MEASURE_AGGREGATOR.get(int(code), "Unknown")  # type: ignore[arg-type]
+        return MEASURE_AGGREGATOR.get(int(code), "Unknown")
     except (TypeError, ValueError):
         return "Unknown"
 
@@ -81,8 +87,10 @@ DIMENSION_TYPE = {
 
 
 def dimension_type_name(code: int | str | None) -> str:
+    if code is None:
+        return "Unknown"
     try:
-        return DIMENSION_TYPE.get(int(code), "Unknown")  # type: ignore[arg-type]
+        return DIMENSION_TYPE.get(int(code), "Unknown")
     except (TypeError, ValueError):
         return "Unknown"
 

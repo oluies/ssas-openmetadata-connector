@@ -15,18 +15,15 @@ permissions:
 
 jobs:
   lint:
-    name: ruff + mypy
+    name: ruff + ty
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - run: pip install ruff==0.6.* mypy==1.11.* types-requests
-      - name: ruff
-        run: ruff check .
-      - name: mypy (SDK-free core; source.py is the SDK boundary)
-        run: mypy
+      - uses: astral-sh/setup-uv@v6
+      - name: ruff (Astral linter)
+        run: uvx ruff@latest check .
+      - name: ty (Astral type checker; SDK-free core, source.py is the SDK boundary)
+        run: uvx ty@0.0.73 check
 
   test-offline:
     name: offline unit tests (py ${{ matrix.python-version }})
@@ -37,14 +34,16 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      # the image wraps `pip` to refuse root; `python -m pip` bypasses that wrapper.
-      - run: python -m pip install --root-user-action=ignore pytest pytest-socket lxml requests
+      - uses: astral-sh/setup-uv@v6
       # source.py tests importorskip the OpenMetadata SDK (absent here) and skip;
       # the SDK-free, socket-blocked hermetic suite must stay green on every version.
-      - run: python -m pytest tests/unit
+      - name: pytest (hermetic core)
+        env:
+          PYTHONPATH: src
+        run: >
+          uv run --no-project --python ${{ matrix.python-version }}
+          --with pytest --with pytest-socket --with lxml --with requests
+          pytest tests/unit
 
   test-sdk:
     name: full suite (OpenMetadata SDK image)
@@ -56,7 +55,11 @@ jobs:
       options: --user root
     steps:
       - uses: actions/checkout@v4
-      - run: pip install pytest pytest-socket lxml
+      - uses: astral-sh/setup-uv@v6
+      # uv installs straight into the image's Python (which carries the OM SDK),
+      # bypassing the image's `pip` wrapper that refuses to run as root.
+      - name: install test deps into the SDK python
+        run: uv pip install --system --python "$(command -v python)" pytest pytest-socket lxml
       - name: pytest (incl. SsasSource + sample data)
         env:
           PYTHONPATH: src

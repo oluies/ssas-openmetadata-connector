@@ -22,7 +22,7 @@ dev = [
   "pytest-socket>=0.7",
   "lxml>=5",
   "ruff>=0.6",
-  "mypy>=1.11",
+  "ty>=0.0.73",
 ]
 
 [tool.hatch.version]
@@ -38,18 +38,14 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
-[tool.mypy]
-python_version = "3.10"
-strict = true
-files = ["src"]
-# source.py is the only OpenMetadata-SDK-facing module; the SDK's pydantic models
-# require every field, so strict typing there is impractical (see ARCHITECTURE.md).
-# It is exercised by the SDK-backed test suite instead.
-exclude = ['^src/ssas_om/source\.py$']
+[tool.ty.environment]
+python-version = "3.10"
 
-[[tool.mypy.overrides]]
-module = ["requests_kerberos.*", "requests_ntlm.*", "pymssql.*", "metadata.*"]
-ignore_missing_imports = true
+[tool.ty.src]
+# source.py is the only OpenMetadata-SDK-facing module; the SDK's pydantic models
+# require every field, so type-checking it in isolation is impractical (see
+# ARCHITECTURE.md). It is exercised by the SDK-backed test suite instead.
+exclude = ["src/ssas_om/source.py"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

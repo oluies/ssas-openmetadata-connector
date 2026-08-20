@@ -64,7 +64,10 @@ def _requests_auth(mechanism: str, user: str, password: str) -> Any:
         return (user, password)
     if mech in ("kerberos", "negotiate"):
         try:
-            from requests_kerberos import OPTIONAL, HTTPKerberosAuth
+            from requests_kerberos import (  # ty: ignore[unresolved-import]
+                OPTIONAL,
+                HTTPKerberosAuth,
+            )
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError(
                 "authMechanism='kerberos' needs the extra: pip install '...[kerberos]'"
@@ -72,7 +75,7 @@ def _requests_auth(mechanism: str, user: str, password: str) -> Any:
         return HTTPKerberosAuth(mutual_authentication=OPTIONAL)
     if mech == "ntlm":
         try:
-            from requests_ntlm import HttpNtlmAuth
+            from requests_ntlm import HttpNtlmAuth  # ty: ignore[unresolved-import]
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError(
                 "authMechanism='ntlm' needs the extra: pip install '...[ntlm]'"

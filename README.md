@@ -231,11 +231,20 @@ Unit tests are **offline and hermetic** — sockets are disabled and every respo
 recorded, scrubbed fixtures under `tests/fixtures/xmla/`. They never touch the live host.
 
 ```bash
-python -m pytest            # SDK-free modules run; source tests skip without the OM SDK
+uv run --no-project --with pytest --with pytest-socket --with lxml --with requests \
+  pytest tests/unit            # SDK-free modules run; source tests skip without the OM SDK
+```
+
+Lint and type-check with the Astral stack (managed by [uv](https://docs.astral.sh/uv/)):
+
+```bash
+uvx ruff check .               # linter
+uvx ty check                   # type checker (SDK-free core; source.py is the SDK boundary)
 ```
 
 Full coverage (including the `SsasSource` tests) runs where the OpenMetadata SDK is present —
-e.g. inside the ingestion image. No fixture, log, or commit ever contains a host, IP,
+e.g. inside the ingestion image. CI runs all three: `ruff` + `ty`, the hermetic suite on
+Python 3.10-3.12, and the full suite inside `openmetadata/ingestion:1.13.3`. No fixture, log, or commit ever contains a host, IP,
 username, machine name, SID or connection string (enforced by a pre-commit leak-gate).
 
 ## Repository layout
