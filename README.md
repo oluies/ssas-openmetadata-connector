@@ -273,6 +273,13 @@ tests/              offline unit tests + recorded fixtures
 specs/, docs/       spec-kit artefacts, discovery report, normative references
 ```
 
+## Credits
+
+- **Örjan Lundberg** — creator and lead committer.
+  [LinkedIn](https://www.linkedin.com/in/orjanlundberg/)
+- **Mattias Lind** — SQL Server expert; advised on the SSAS / SQL Server side.
+  [mattiaslind.info](https://mattiaslind.info)
+
 ## License
 
 Apache License 2.0 — see [`LICENSE`](LICENSE).
