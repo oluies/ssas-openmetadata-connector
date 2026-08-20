@@ -1,0 +1,15 @@
+SSAS → OpenMetadata connector
+Copyright 2026 Örjan Lundberg
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This connector depends on, and is designed to run inside, the OpenMetadata
+ingestion runtime (the "openmetadata-ingestion" Python package), which is made
+available by Collate, Inc. under the Collate Community License Agreement,
+Version 1.0 (http://www.getcollate.io/collate-community-license). This project
+does not bundle or redistribute that software — it is installed separately at
+runtime. Use of the OpenMetadata SDK, including via this connector, is subject
+to the Collate Community License. Among other things, that license prohibits use
+for an "Excluded Purpose" (offering a software-, platform-, or
+infrastructure-as-a-service that competes with Collate's products or services).
+Ensure your use complies with those terms.

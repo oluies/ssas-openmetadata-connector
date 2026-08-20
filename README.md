@@ -7,6 +7,7 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 ![Checked with ty](https://img.shields.io/badge/types-ty-261230)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 
 
 A read-only [OpenMetadata](https://open-metadata.org) ingestion connector for **SQL
@@ -271,5 +272,16 @@ scripts/            probe.py (discovery) and run-ingestion.sh
 tests/              offline unit tests + recorded fixtures
 specs/, docs/       spec-kit artefacts, discovery report, normative references
 ```
+
+## License
+
+Apache License 2.0 — see [`LICENSE`](LICENSE).
+
+This connector **depends on** the OpenMetadata SDK (`openmetadata-ingestion`), which
+Collate, Inc. distributes under the **Collate Community License Agreement v1.0** (a
+source-available license that, among other things, forbids use for a competing
+software/platform/infrastructure-as-a-service). This project does not bundle or
+redistribute that SDK — it is installed separately — but running the connector means
+running the SDK, so your use must comply with those terms. See [`NOTICE`](NOTICE).
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the design and data flow.
