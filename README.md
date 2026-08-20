@@ -15,6 +15,8 @@
   [LinkedIn](https://www.linkedin.com/in/orjanlundberg/)
 - **Mattias Lind** — SQL Server expert; advised on the SSAS / SQL Server side.
   [mattiaslind.info](https://mattiaslind.info)
+- **[Hetzner](https://www.hetzner.com/)** — cloud infrastructure hosting the SSAS
+  test fixture (SQL Server + tabular & multidimensional Analysis Services).
 
 A read-only [OpenMetadata](https://open-metadata.org) ingestion connector for **SQL
 Server Analysis Services**, over XMLA/HTTP (`msmdpump`). It ingests both model kinds as
