@@ -28,6 +28,20 @@ source:
       includeViews: true
       schemaFilterPattern:
         includes: ["dbo"]
+
+# Relational-side sample data & column profiling is a SEPARATE OpenMetadata
+# "profiler" workflow (type: profiler) over the same service — it samples real
+# rows from SQL Server. To run it, use a profiler workflow and toggle sampling
+# with generateSampleData (default true) / disable it per table:
+#   source:
+#     sourceConfig:
+#       config:
+#         type: Profiler
+#         generateSampleData: true      # set false to skip sample rows
+#         profileSample: 50             # percent or row count of the sample
+#   processor:
+#     type: orm-profiler
+#     config: {}
 sink:
   type: metadata-rest
   config: {}

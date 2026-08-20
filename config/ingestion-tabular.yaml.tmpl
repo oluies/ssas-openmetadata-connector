@@ -17,6 +17,10 @@ source:
         lineageService: "hetzner_mssql"
         lineageDatabase: "AdventureWorksDW2022"
         lineageSchema: "dbo"
+        # sample data: a few example rows per tabular table (DAX EVALUATE TOPN).
+        # On by default; set includeSampleData: "false" to disable, or lower the cap.
+        includeSampleData: "true"
+        sampleDataRowCount: "50"
   sourceConfig:
     config:
       type: DatabaseMetadata

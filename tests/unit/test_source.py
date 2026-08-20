@@ -165,3 +165,63 @@ def test_iter_emits_lineage_edges_sql_to_ssas():
         ssas = fqn_to_id[f"ssas_tabular.AWTabular.Model.{tbl}"]
         # edge direction is SQL source -> SSAS target
         assert (str(sql), str(ssas)) in got
+
+
+# A DAX EVALUATE rowset: element names are XML-name-encoded (`[`=_x005B_, `]`=_x005D_).
+_DAX_ROWSET = (
+    '<return xmlns="urn:schemas-microsoft-com:xml-analysis">'
+    '<root xmlns="urn:schemas-microsoft-com:xml-analysis:rowset">'
+    "<row><DimProduct_x005B_ProductKey_x005D_>1</DimProduct_x005B_ProductKey_x005D_>"
+    "<DimProduct_x005B_EnglishProductName_x005D_>Road Bike"
+    "</DimProduct_x005B_EnglishProductName_x005D_>"
+    "<_x005B_RowNumber_x005D_>0</_x005B_RowNumber_x005D_></row>"
+    "<row><DimProduct_x005B_ProductKey_x005D_>2</DimProduct_x005B_ProductKey_x005D_>"
+    "<DimProduct_x005B_EnglishProductName_x005D_>Mountain Bike"
+    "</DimProduct_x005B_EnglishProductName_x005D_>"
+    "<_x005B_RowNumber_x005D_>1</_x005B_RowNumber_x005D_></row>"
+    "</root></return>"
+)
+
+
+def _sample_transport(url, body, action):
+    if "EVALUATE" in body:
+        return 200, _DAX_ROWSET
+    return _fixture_transport(url, body, action)
+
+
+def test_sample_data_ingested_with_decoded_columns():
+    src = _make_source()
+    src.client = XmlaClient("http://ssas.internal/olap-tab/msmdpump.dll",
+                            "reader", "pw", transport=_sample_transport)
+    # drain the generator so the post-pass sample-data call runs
+    list(src._iter())
+
+    calls = src.metadata.ingest_table_sample_data.call_args_list
+    assert calls, "expected sample data to be ingested"
+    # bracket-encoded prefixes stripped, RowNumber dropped
+    data = calls[0].kwargs["sample_data"]
+    cols = [c.root if hasattr(c, "root") else c for c in data.columns]
+    assert cols == ["ProductKey", "EnglishProductName"]
+    assert data.rows == [["1", "Road Bike"], ["2", "Mountain Bike"]]
+
+
+def test_sample_data_can_be_disabled():
+    config = {
+        "type": "customDatabase",
+        "serviceName": "ssas_tabular",
+        "serviceConnection": {"config": {
+            "type": "CustomDatabase",
+            "sourcePythonClass": "ssas_om.source.SsasSource",
+            "connectionOptions": {
+                "host": "http://ssas.internal", "endpoint": "/olap-tab/msmdpump.dll",
+                "user": "reader", "password": "pw", "catalog": "AWTabular",
+                "includeSampleData": "false",
+            },
+        }},
+        "sourceConfig": {"config": {"type": "DatabaseMetadata"}},
+    }
+    src = SsasSource.create(config, MagicMock())
+    src.client = XmlaClient("http://ssas.internal/olap-tab/msmdpump.dll",
+                            "reader", "pw", transport=_sample_transport)
+    list(src._iter())
+    src.metadata.ingest_table_sample_data.assert_not_called()

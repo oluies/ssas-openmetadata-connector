@@ -136,6 +136,27 @@ Each cube dimension and the tabular tables land as tables with typed columns —
 
 ![The Product table with its typed Product Key column](docs/images/openmetadata-table-columns.png)
 
+## Sample data & profiling
+
+Beyond structure, the connector attaches a few **example rows** to each tabular table so
+the OpenMetadata *Sample Data* tab is populated. It reads them the same read-only way it
+reads metadata — a DAX `EVALUATE TOPN(n, 'Table')` against the model — and posts them via
+the sample-data API. It is **on by default** and fully optional:
+
+```yaml
+connectionOptions:
+  includeSampleData: "false"   # turn it off entirely
+  sampleDataRowCount: "20"     # or just cap how many rows are sampled (default 50)
+```
+
+Only **tabular** tables are sampled (a multidimensional MDX sampler is a follow-up), the
+`RowNumber` system column is dropped, and a failed sample query never fails the run — it is
+logged and skipped. Sampling reads live data, so leave it off for sensitive models.
+
+For the **relational** source, row sampling and column statistics come from OpenMetadata's
+own **profiler** workflow (a separate `type: Profiler` run over the `hetzner_mssql` service),
+toggled with `generateSampleData` — see `config/ingestion-mssql.yaml.tmpl`.
+
 ## Configuration
 
 Credentials come only from a gitignored `.env` (never committed). The ingestion templates
@@ -151,6 +172,8 @@ into a `0600`, auto-deleted runtime file.
 | `user`, `password` | yes | reader credentials |
 | `catalog` | no | restrict to one catalog; otherwise all are discovered |
 | `authMechanism` | no | `basic` (default), `kerberos`, `negotiate`, `ntlm` |
+| `includeSampleData` | no | sample a few rows per tabular table (default `true`; set `false` to disable) |
+| `sampleDataRowCount` | no | max rows to sample per table (default `50`) |
 | `lineageService` / `lineageDatabase` / `lineageSchema` | no | link tables to a SQL source (schema default `dbo`) |
 
 ### Security models

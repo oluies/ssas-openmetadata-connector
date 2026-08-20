@@ -10,6 +10,7 @@ request is ever issued.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import Any
 from xml.sax.saxutils import escape
@@ -23,7 +24,12 @@ from metadata.generated.schema.api.lineage.addLineage import AddLineageRequest
 from metadata.generated.schema.api.services.createDatabaseService import (
     CreateDatabaseServiceRequest,
 )
-from metadata.generated.schema.entity.data.table import Column, DataType, Table
+from metadata.generated.schema.entity.data.table import (
+    Column,
+    DataType,
+    Table,
+    TableData,
+)
 from metadata.generated.schema.entity.services.databaseService import (
     DatabaseServiceType,
 )
@@ -39,7 +45,7 @@ from metadata.ingestion.ometa.ometa_api import OpenMetadata
 from metadata.utils.logger import ingestion_logger
 
 from .classify import Catalog, list_catalogs
-from .client import XmlaClient
+from .client import XmlaClient, parse_rowset
 from .csdl import parse_csdl
 from .mapper_cube import plan_cubes
 from .mapper_tabular import plan_tabular
@@ -58,6 +64,35 @@ def _om_type(name: str) -> DataType:
         return _FALLBACK_TYPE
 
 
+def _as_bool(value: Any, default: bool) -> bool:
+    """connectionOptions arrive as strings; parse a permissive boolean."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _as_int(value: Any, default: int) -> int:
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
+# An XMLA rowset element name encodes non-name characters as `_xHHHH_`
+# ([MS-SSAS]/SQL Server XML name escaping) — e.g. `[` -> `_x005B_`, `]` -> `_x005D_`.
+_XNAME = re.compile(r"_x([0-9A-Fa-f]{4})_")
+# DAX EVALUATE labels columns as `Table[Column]`; keep only the column name.
+_DAX_COL = re.compile(r"^.*\[(?P<col>.*)\]$")
+
+
+def _dax_column_name(key: str) -> str:
+    decoded = _XNAME.sub(lambda m: chr(int(m.group(1), 16)), key)
+    m = _DAX_COL.match(decoded)
+    return m.group("col") if m else decoded
+
+
 class SsasSource(Source):
     def __init__(self, config: WorkflowSource, metadata: OpenMetadata) -> None:
         super().__init__()
@@ -73,6 +108,9 @@ class SsasSource(Source):
         self.lineage_service = opts.get("lineageService")
         self.lineage_database = opts.get("lineageDatabase")
         self.lineage_schema = opts.get("lineageSchema", "dbo")
+        # sample data: on by default; a reader can turn it off or cap the row count
+        self.include_sample_data = _as_bool(opts.get("includeSampleData"), True)
+        self.sample_data_row_count = _as_int(opts.get("sampleDataRowCount"), 50)
         self.service_name = config.serviceName
         self.client = XmlaClient(
             url=self.host + self.endpoint,
@@ -121,6 +159,7 @@ class SsasSource(Source):
                 emitted_service = True
             yield from self._emit_database(plan)
             yield from self._emit_lineage(plan)
+            self._emit_sample_data(plan, cat)
 
     def _plan_tabular_catalog(self, cat: Catalog) -> ServicePlan | None:
         r = self.client.discover(
@@ -199,6 +238,53 @@ class SsasSource(Source):
                         )
                     )
                 )
+
+    def _emit_sample_data(self, plan: ServicePlan, cat: Catalog) -> None:
+        """Attach a few example rows to each table (reader-side, best-effort).
+
+        Tabular tables are sampled with DAX ``EVALUATE TOPN(n, 'Table')``; the rows are
+        posted via the OpenMetadata sample-data API (not the Create* stream), so the
+        tables must already be sinked — this runs after ``_emit_database`` yields them.
+        Multidimensional cubes are not sampled here (an MDX sampler is a follow-up).
+        Controlled by ``includeSampleData`` (default on) and ``sampleDataRowCount``.
+        """
+        if not self.include_sample_data:
+            return
+        if cat.kind != "tabular":
+            logger.debug("sample data skipped for %s: only tabular is supported", cat.name)
+            return
+        n = max(1, self.sample_data_row_count)
+        for schema in plan.schemas:
+            for table in schema.tables:
+                fqn = f"{plan.service}.{plan.database}.{schema.name}.{table.name}"
+                entity = self.metadata.get_by_name(entity=Table, fqn=fqn)
+                if entity is None:
+                    logger.warning("sample data skipped: table not found: %s", fqn)
+                    continue
+                data = self._sample_tabular(cat.name, table.name, n)
+                if data is None:
+                    continue
+                try:
+                    self.metadata.ingest_table_sample_data(table=entity, sample_data=data)
+                except Exception:  # noqa: BLE001 - never fail a run over sample data
+                    logger.warning("sample data ingest failed for %s", fqn, exc_info=True)
+
+    def _sample_tabular(self, catalog: str, table_name: str, n: int) -> TableData | None:
+        """Query up to ``n`` rows of a tabular table via DAX and shape TableData."""
+        escaped = table_name.replace("'", "''")
+        r = self.client.execute(f"EVALUATE TOPN({n}, '{escaped}')", catalog=catalog)
+        if not r.ok:
+            logger.debug("sample query returned no rows for %s", table_name)
+            return None
+        rows = parse_rowset(r.text)
+        if not rows:
+            return None
+        keys = [k for k in rows[0] if _dax_column_name(k).lower() != "rownumber"]
+        if not keys:
+            return None
+        columns = [_dax_column_name(k) for k in keys]
+        table_rows = [[row.get(k, "") for k in keys] for row in rows]
+        return TableData(columns=columns, rows=table_rows)
 
     def close(self) -> None:
         return None
