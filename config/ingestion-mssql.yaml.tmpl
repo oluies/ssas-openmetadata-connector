@@ -7,11 +7,20 @@ source:
   serviceConnection:
     config:
       type: Mssql
+      # SQL-auth default (pure-Python, no ODBC driver):
       scheme: mssql+pymssql
       username: "${MSSQL_USER}"
       password: "${MSSQL_PASSWORD}"
       hostPort: "${MSSQL_HOST}:1433"
       database: "AdventureWorksDW2022"
+      # --- Windows / Kerberos integrated auth (OM built-in, no extra install) ---
+      # python-tds (pytds) ships in the ingestion image with KerberosAuth/SspiAuth/
+      # NtlmAuth/SpnegoAuth. To use it: switch the scheme to mssql+pytds, provide a
+      # krb5.conf + ticket/keytab (kinit) in the runtime, and set the SQL SPN:
+      #   scheme: mssql+pytds
+      #   connectionArguments:
+      #     use_sspi: true            # Windows integrated auth via pytds
+      #   # username/password may be omitted when a Kerberos ticket is present.
   sourceConfig:
     config:
       type: DatabaseMetadata

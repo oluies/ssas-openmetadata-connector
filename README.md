@@ -137,8 +137,12 @@ logged-in Windows identity (true Windows SSPI works only if the connector runs o
 Requesting `kerberos`/`ntlm` without the matching extra installed raises a clear error naming
 the missing extra. The connector never logs request bodies or the `Authorization` header.
 Basic over plain HTTP sends credentials in clear text — use it only behind a network
-firewall, or put HTTPS in front. The MSSQL lineage source is a separate built-in
-OpenMetadata connector (`pymssql`) with its own auth settings.
+firewall, or put HTTPS in front. The **MSSQL lineage source** is a separate, built-in OpenMetadata connector with its own
+auth — and unlike the XMLA path it needs no extra: OpenMetadata's SQL Server adapter
+ships **python-tds (`pytds`)** in the ingestion image, which has native Kerberos /
+Negotiate / NTLM / SSPI. Use `scheme: mssql+pytds` (with a krb5.conf + ticket) for
+Windows integrated auth to the SQL engine; `mssql+pymssql` (the default here) is plain
+SQL auth, `mssql+pyodbc` supports ODBC `Trusted_Connection`/Azure AD.
 
 > Status: the `basic` path is validated end-to-end against a live instance. The
 > `kerberos`/`negotiate`/`ntlm` selection logic is unit-tested, but end-to-end validation
