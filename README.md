@@ -9,6 +9,12 @@
 ![Checked with ty](https://img.shields.io/badge/types-ty-261230)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 
+## Credits
+
+- **Örjan Lundberg** — creator and lead committer.
+  [LinkedIn](https://www.linkedin.com/in/orjanlundberg/)
+- **Mattias Lind** — SQL Server expert; advised on the SSAS / SQL Server side.
+  [mattiaslind.info](https://mattiaslind.info)
 
 A read-only [OpenMetadata](https://open-metadata.org) ingestion connector for **SQL
 Server Analysis Services**, over XMLA/HTTP (`msmdpump`). It ingests both model kinds as
@@ -272,13 +278,6 @@ scripts/            probe.py (discovery) and run-ingestion.sh
 tests/              offline unit tests + recorded fixtures
 specs/, docs/       spec-kit artefacts, discovery report, normative references
 ```
-
-## Credits
-
-- **Örjan Lundberg** — creator and lead committer.
-  [LinkedIn](https://www.linkedin.com/in/orjanlundberg/)
-- **Mattias Lind** — SQL Server expert; advised on the SSAS / SQL Server side.
-  [mattiaslind.info](https://mattiaslind.info)
 
 ## License
 
