@@ -42,6 +42,8 @@ select = ["E", "F", "I", "B", "UP"]
 python-version = "3.10"
 
 [tool.ty.src]
+# Type-check the package, not the tests (their dynamic importlib patterns are noise).
+include = ["src"]
 # source.py is the only OpenMetadata-SDK-facing module; the SDK's pydantic models
 # require every field, so type-checking it in isolation is impractical (see
 # ARCHITECTURE.md). It is exercised by the SDK-backed test suite instead.
