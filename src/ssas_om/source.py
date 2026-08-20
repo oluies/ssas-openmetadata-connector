@@ -40,7 +40,9 @@ from metadata.ingestion.ometa.ometa_api import OpenMetadata
 from .classify import Catalog, list_catalogs
 from .client import XmlaClient
 from .csdl import parse_csdl
+from .mapper_cube import plan_cube
 from .mapper_tabular import plan_tabular
+from .mdschema import build_cube_from_client
 from .plan import ServicePlan
 
 _FALLBACK_TYPE = DataType.VARCHAR if hasattr(DataType, "VARCHAR") else DataType.STRING
@@ -102,23 +104,38 @@ class SsasSource(Source):
     def _iter(self) -> Iterable[Either[Entity]]:
         emitted_service = False
         for cat in self._catalogs():
-            if cat.kind != "tabular":
-                continue  # milestone-1: tabular database service
-            r = self.client.discover(
-                "DISCOVER_CSDL_METADATA",
-                catalog=cat.name,
-                restrictions=f"<CATALOG_NAME>{escape(cat.name)}</CATALOG_NAME>",
-            )
-            if not r.ok:
+            if cat.kind == "tabular":
+                plan = self._plan_tabular_catalog(cat)
+            elif cat.kind == "multidimensional":
+                plan = self._plan_cube_catalog(cat)
+            else:
                 continue
-            model = parse_csdl(r.text)
-            # relationships are parsed but lineage emission is out of milestone-1 scope
-            plan, _rels = plan_tabular(model, service=self.service_name, database=cat.name)
+            if plan is None:
+                continue
             if not emitted_service:
                 yield self._service_request()
                 emitted_service = True
             yield from self._emit_database(plan)
             yield from self._emit_lineage(plan)
+
+    def _plan_tabular_catalog(self, cat: Catalog) -> ServicePlan | None:
+        r = self.client.discover(
+            "DISCOVER_CSDL_METADATA",
+            catalog=cat.name,
+            restrictions=f"<CATALOG_NAME>{escape(cat.name)}</CATALOG_NAME>",
+        )
+        if not r.ok:
+            return None
+        # relationships are parsed but lineage emission is name-based (see _emit_lineage)
+        plan, _rels = plan_tabular(model=parse_csdl(r.text),
+                                   service=self.service_name, database=cat.name)
+        return plan
+
+    def _plan_cube_catalog(self, cat: Catalog) -> ServicePlan | None:
+        cube = build_cube_from_client(self.client, cat.name)
+        if not cube.name:
+            return None
+        return plan_cube(cube, service=self.service_name, database=cat.name)
 
     def _service_request(self) -> Either[Entity]:
         return Either(

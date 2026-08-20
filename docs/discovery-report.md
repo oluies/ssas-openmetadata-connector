@@ -128,11 +128,11 @@ mislabels the asset.
 Options to resolve (needs a call):
 - **A. Pick the least-wrong type** (e.g. `PowerBIDataModel`) with a description noting it
   is an SSAS cube. Fast, but misleading in the catalog.
-- **B. Model the cube as a Database service** (the clarify's alternative): measure groups
+- **B. Model the cube as a Database service** [IMPLEMENTED] (the clarify's alternative): measure groups
   + dimensions → tables, attributes/measures → columns. Reuses the verified tabular
   emission path, fits cleanly, no misrepresentation. **Recommended.**
 - **C. Custom entity type** via OM schema extension. Most faithful, most work.
 
 The MDSCHEMA parser (`mdschema.py`) and cube mapper (`mapper_cube.py`) are implemented and
-tested; only the emission target is blocked on this decision. Tabular ingestion + lineage
+tested; the emission target uses option B (database service): verified in OM as ssas_md / AWCube with Product + Measures tables. Tabular ingestion + lineage
 (the milestone) are complete and unaffected.

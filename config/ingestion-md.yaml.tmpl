@@ -1,0 +1,28 @@
+# Multidimensional cube ingestion — cube modelled as a Database service (option B):
+# dimensions -> tables of attribute columns, plus a synthetic Measures table.
+# Committed as a TEMPLATE — no secrets.
+source:
+  type: customDatabase
+  serviceName: ssas_md
+  serviceConnection:
+    config:
+      type: CustomDatabase
+      sourcePythonClass: ssas_om.source.SsasSource
+      connectionOptions:
+        host: "${SSAS_HOST}"
+        endpoint: "/olap-md/msmdpump.dll"
+        user: "${SSAS_USER}"
+        password: "${SSAS_PASSWORD}"
+        catalog: "AWMultidim"
+  sourceConfig:
+    config:
+      type: DatabaseMetadata
+sink:
+  type: metadata-rest
+  config: {}
+workflowConfig:
+  openMetadataServerConfig:
+    hostPort: "http://openmetadata-server:8585/api"
+    authProvider: openmetadata
+    securityConfig:
+      jwtToken: "${OM_JWT_TOKEN}"

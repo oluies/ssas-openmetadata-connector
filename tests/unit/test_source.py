@@ -82,3 +82,40 @@ def test_test_connection_raises_on_fault():
                             "reader", "pw", transport=bad)
     with pytest.raises(ConnectionError):
         src.test_connection()
+
+
+def _md_transport(url, body, action):
+    md = Path(__file__).resolve().parents[1] / "fixtures" / "xmla" / "md"
+    if "DBSCHEMA_CATALOGS" in body:
+        return 200, (md / "discover.DBSCHEMA_CATALOGS.xml").read_text()
+    import re
+    m = re.search(r"\$SYSTEM\.([A-Z_]+)", body)
+    if m:
+        f = md / f"execute.{m.group(1)}.xml"
+        if f.exists():
+            return 200, f.read_text()
+    return 200, "<root/>"
+
+
+def test_iter_multidimensional_emits_database_from_cube():
+    config = {
+        "type": "customDatabase",
+        "serviceName": "ssas_md",
+        "serviceConnection": {"config": {
+            "type": "CustomDatabase",
+            "sourcePythonClass": "ssas_om.source.SsasSource",
+            "connectionOptions": {
+                "host": "http://ssas.internal", "endpoint": "/olap-md/msmdpump.dll",
+                "user": "reader", "password": "pw", "catalog": "AWMultidim",
+            },
+        }},
+        "sourceConfig": {"config": {"type": "DatabaseMetadata"}},
+    }
+    src = SsasSource.create(config, MagicMock())
+    src.client = XmlaClient("http://ssas.internal/olap-md/msmdpump.dll",
+                            "reader", "pw", transport=_md_transport)
+    entities = [e.right for e in src._iter() if e.right is not None]
+    kinds = [type(e).__name__ for e in entities]
+    assert kinds.count("CreateDatabaseServiceRequest") == 1
+    tables = {e.name.root for e in entities if type(e).__name__ == "CreateTableRequest"}
+    assert "Product" in tables and "Measures" in tables

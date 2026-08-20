@@ -12,7 +12,7 @@ def test_plan_cube_from_md_fixtures(fixture_xml):
         f("execute.MDSCHEMA_MEASURES"),
     )
     svc = plan_cube(cube, service="ssas_md", database="AWMultidim")
-    assert svc.service_type == "dashboard"
+    assert svc.service_type == "database"
     assert svc.schemas[0].name == "AWCube"
     names = {t.name for t in svc.schemas[0].tables}
     assert "Product" in names and "Measures" in names

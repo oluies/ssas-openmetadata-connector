@@ -1,8 +1,10 @@
 """MDSCHEMA cube -> OpenMetadata Dashboard DataModel ingestion plan (T011).
 
-Per the clarify decision, a multidimensional cube maps to a Dashboard service with a
-DashboardDataModel (measures + dimension attributes as its columns) — a cube-specific
-shape distinct from the tabular database-service shape.
+A multidimensional cube maps to a Database service (option B): the cube is a schema,
+its dimensions become tables of attribute columns, and a synthetic Measures table holds
+the visible measures. This reuses the tabular database emission path cleanly, avoiding
+OpenMetadata's DashboardDataModel requirement for a vendor-specific dataModelType that
+does not represent an SSAS cube. See docs/discovery-report.md.
 """
 from __future__ import annotations
 
@@ -34,7 +36,7 @@ def plan_cube(cube: mdschema.Cube, service: str, database: str) -> ServicePlan:
         )
     return ServicePlan(
         service=service,
-        service_type="dashboard",
+        service_type="database",
         database=database,
         schemas=[SchemaPlan(name=cube.name, tables=tables)],
     )
