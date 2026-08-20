@@ -50,9 +50,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: docker.getcollate.io/openmetadata/ingestion:1.13.3
+      # the ingestion image runs as a non-root user; run as root so the Actions
+      # runner can write its temp/work dirs (checkout) inside the container.
+      options: --user root
     steps:
       - uses: actions/checkout@v4
-      - run: pip install --user pytest pytest-socket lxml
+      - run: pip install pytest pytest-socket lxml
       - name: pytest (incl. SsasSource + sample data)
         env:
           PYTHONPATH: src
