@@ -32,6 +32,45 @@ flowchart LR
     conn -. "table-level lineage" .-> om
 ```
 
+## The two connectors
+
+This project involves **two** OpenMetadata connectors that together give you the SSAS
+metadata *and* its lineage back to the relational source. They are easy to confuse, so:
+
+### 1. SSAS XMLA connector — the custom one (this repo)
+
+`ssas_om.source.SsasSource`. It connects to **SQL Server Analysis Services** over
+**XMLA / HTTP** — the IIS `msmdpump.dll` endpoint — and ingests the *analytic* layer:
+tabular models (via CSDL) and multidimensional cubes (via MDSCHEMA), each as an
+OpenMetadata **database service** with tables and typed columns. This is the code you are
+looking at. Its auth is HTTP-based: `basic` (default), or `kerberos` / `negotiate` / `ntlm`
+via the `requests-*` extras (`authMechanism`).
+
+### 2. MSSQL lineage source — OpenMetadata's built-in one
+
+OpenMetadata's own **SQL Server** connector. We do **not** write it — we only supply a
+config (`config/ingestion-mssql.yaml.tmpl`). It ingests the *relational* database the SSAS
+models are built from (e.g. `AdventureWorksDW2022`) — its tables, columns and views — as a
+separate database service. Its auth uses a SQLAlchemy driver: `mssql+pymssql` (SQL auth,
+the default here), `mssql+pytds` (Windows/Kerberos, bundled — no extra), or `mssql+pyodbc`
+(ODBC `Trusted_Connection` / Azure AD).
+
+### Why both, and how they connect
+
+An SSAS model is derived from relational tables. The SSAS connector catalogs the analytic
+layer; the MSSQL source catalogs the relational layer; then the SSAS connector emits
+**table-level lineage** linking each SSAS table to its matching SQL source table (by name).
+
+```mermaid
+flowchart LR
+    ssas["SSAS XMLA connector\n(this repo, custom)"] -->|"analytic models"| omA["OpenMetadata:\nssas_tabular / ssas_md"]
+    mssql["MSSQL source\n(OpenMetadata built-in)"] -->|"relational tables"| omB["OpenMetadata:\nhetzner_mssql"]
+    omA -. "table-level lineage" .-> omB
+```
+
+Run either connector alone if you only want that layer; **lineage needs both** (ingest the
+MSSQL source first so the SSAS connector can resolve the target tables).
+
 ## How it is installed and distributed
 
 The connector is an ordinary Python package (`ssas-om-connector`, package `ssas_om`) whose
