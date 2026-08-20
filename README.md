@@ -123,6 +123,19 @@ export OM_JWT_TOKEN=...        # e.g. admin login token from your OM instance
 The result in OpenMetadata: database services `ssas_tabular`, `ssas_md`, and `hetzner_mssql`,
 with the SSAS tables linked to their SQL source.
 
+## What it looks like in OpenMetadata
+
+After ingestion, the analytic models and their relational source sit side by side in the
+catalog — `ssas_md` (multidimensional cube `AWCube`), `ssas_tabular` (tabular `AWTabular` /
+`Model`), and the built-in `hetzner_mssql` source:
+
+![OpenMetadata Explore tree showing ssas_md, ssas_tabular and hetzner_mssql services](docs/images/openmetadata-explore-tree.png)
+
+Each cube dimension and the tabular tables land as tables with typed columns — e.g. the
+`Product` table under `ssas_md / AWMultidim / AWCube`:
+
+![The Product table with its typed Product Key column](docs/images/openmetadata-table-columns.png)
+
 ## Configuration
 
 Credentials come only from a gitignored `.env` (never committed). The ingestion templates
