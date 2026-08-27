@@ -13,7 +13,7 @@ license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Örjan Lundberg" }]
 dependencies = [
   "requests>=2.31",
-  "openmetadata-ingestion==1.13.3.*",
+  "openmetadata-ingestion>=1.13.3,<2.0.1",
 ]
 
 [project.optional-dependencies]
