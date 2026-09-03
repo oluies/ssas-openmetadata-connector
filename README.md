@@ -3,7 +3,7 @@
 [![CI](https://github.com/oluies/ssas-openmetadata-connector/actions/workflows/ci.yml/badge.svg?branch=001-ssas-openmetadata-metadata)](https://github.com/oluies/ssas-openmetadata-connector/actions/workflows/ci.yml)
 [![Secret scan](https://github.com/oluies/ssas-openmetadata-connector/actions/workflows/secret-scan.yml/badge.svg?branch=001-ssas-openmetadata-metadata)](https://github.com/oluies/ssas-openmetadata-connector/actions/workflows/secret-scan.yml)
 ![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)
-![OpenMetadata](https://img.shields.io/badge/OpenMetadata-1.13.3-1890ff)
+![OpenMetadata](https://img.shields.io/badge/OpenMetadata-2.0.1-1890ff)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 ![Checked with ty](https://img.shields.io/badge/types-ty-261230)
@@ -102,8 +102,8 @@ Three distribution modes, from dev to prod:
 flowchart TD
     pkg["ssas_om package\n(src/ssas_om)"]
     A["Dev: bind-mount src into the\ningestion container + PYTHONPATH"]
-    B["Prod: derived image\nFROM openmetadata/ingestion:1.13.3\nRUN pip install ssas-om-connector"]
-    C["Existing env:\npip install ssas-om-connector\ninto the ingestion venv"]
+    B["Prod: derived image\nFROM openmetadata/ingestion:2.0.1.0\nRUN pip install from git"]
+    C["Existing env:\npip install from git\ninto the ingestion venv"]
     pkg --> A
     pkg --> B
     pkg --> C
@@ -115,10 +115,18 @@ flowchart TD
 - **Dev (this repo):** `scripts/run-ingestion.sh` bind-mounts `src/` into
   `openmetadata/ingestion:1.13.3` with `PYTHONPATH=/opt/connector` and runs
   `metadata ingest`. Zero build step.
-- **Prod:** build a thin image `FROM docker.getcollate.io/openmetadata/ingestion:1.13.3`
-  that `pip install`s the wheel, and point your OpenMetadata ingestion pipeline at it.
-- **Existing ingestion venv:** `pip install ssas-om-connector` (+ optional extras) alongside
-  the OpenMetadata SDK.
+- **Prod:** build a thin image `FROM docker.getcollate.io/openmetadata/ingestion:2.0.1.0`
+  that installs the connector, and point your OpenMetadata ingestion pipeline at it.
+- **Existing ingestion venv:** install alongside the OpenMetadata SDK.
+
+> **This package is not published on PyPI.** `pip install ssas-om-connector`
+> will not resolve. Install from git:
+>
+> ```bash
+> pip install "ssas-om-connector[mssql] @ git+https://github.com/oluies/ssas-openmetadata-connector@main"
+> ```
+>
+> Pin to a tag rather than `main` for anything reproducible.
 
 The package builds a normal wheel: `python -m build` (hatchling). Optional extras:
 `[kerberos]`, `[ntlm]`, `[mssql]`.
@@ -214,13 +222,14 @@ logged-in Windows identity (true Windows SSPI works only if the connector runs o
    e.g. `setspn -S HTTP/ssas-host.domain.com DOMAIN\svc_account`.
 2. **Install the extra in the runtime.** In your derived ingestion image:
    ```dockerfile
-   FROM docker.getcollate.io/openmetadata/ingestion:1.13.3
-   RUN pip install 'ssas-om-connector[kerberos]'   # requests-kerberos + gssapi
+   FROM docker.getcollate.io/openmetadata/ingestion:2.0.1.0
+   # requests-kerberos + gssapi; needs libkrb5-dev at build time
+   RUN pip install 'ssas-om-connector[kerberos] @ git+https://github.com/oluies/ssas-openmetadata-connector@main'
    ```
 3. **Provide Kerberos config and credentials** to that container: mount `/etc/krb5.conf` for
    your realm plus a **keytab**, and obtain a ticket before the run
    (`kinit -kt /etc/krb5.keytab svc_account@DOMAIN.COM`), or run under a valid `KRB5CCNAME`
-   ticket cache. For NTLM instead: `pip install 'ssas-om-connector[ntlm]'` and pass the
+   ticket cache. For NTLM instead: use the `[ntlm]` extra and pass the
    Windows `user`/`password` in `DOMAIN\user` form.
 4. **Set the option** in the ingestion config:
    ```yaml
