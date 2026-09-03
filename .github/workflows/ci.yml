@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - name: ruff (Astral linter)
         run: uvx ruff@latest check .
       - name: ty (Astral type checker; SDK-free core, source.py is the SDK boundary)
@@ -34,7 +34,7 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       # source.py tests importorskip the OpenMetadata SDK (absent here) and skip;
       # the SDK-free, socket-blocked hermetic suite must stay green on every version.
       - name: pytest (hermetic core)
@@ -55,7 +55,7 @@ jobs:
       options: --user root
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       # uv installs straight into the image's Python (which carries the OM SDK),
       # bypassing the image's `pip` wrapper that refuses to run as root.
       - name: install test deps into the SDK python
