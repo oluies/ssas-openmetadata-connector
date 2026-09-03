@@ -49,7 +49,7 @@ jobs:
     name: full suite (OpenMetadata SDK image)
     runs-on: ubuntu-latest
     container:
-      image: docker.getcollate.io/openmetadata/ingestion:1.13.3
+      image: docker.getcollate.io/openmetadata/ingestion:2.0.1.0
       # the ingestion image runs as a non-root user; run as root so the Actions
       # runner can write its temp/work dirs (checkout) inside the container.
       options: --user root

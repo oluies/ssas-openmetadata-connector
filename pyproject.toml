@@ -13,7 +13,10 @@ license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Örjan Lundberg" }]
 dependencies = [
   "requests>=2.31",
-  "openmetadata-ingestion==1.13.3.*",
+  # Must match the SDK series of the ingestion image this is installed into.
+  # A mismatch is not an error: both series exist on PyPI, so pip DOWNGRADES the
+  # SDK inside the image and breaks every other connector, not just this one.
+  "openmetadata-ingestion==2.0.1.*",
 ]
 
 [project.optional-dependencies]
