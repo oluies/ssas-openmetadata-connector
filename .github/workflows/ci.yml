@@ -18,7 +18,7 @@ jobs:
     name: ruff + ty
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
       - name: ruff (Astral linter)
         run: uvx ruff@latest check .
@@ -33,7 +33,7 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
       # source.py tests importorskip the OpenMetadata SDK (absent here) and skip;
       # the SDK-free, socket-blocked hermetic suite must stay green on every version.
@@ -54,7 +54,7 @@ jobs:
       # runner can write its temp/work dirs (checkout) inside the container.
       options: --user root
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v6
       # uv installs straight into the image's Python (which carries the OM SDK),
       # bypassing the image's `pip` wrapper that refuses to run as root.
