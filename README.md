@@ -200,7 +200,7 @@ into a `0600`, auto-deleted runtime file.
 |---|---|---|
 | `host` | yes | e.g. `http://ssas-host` |
 | `endpoint` | yes | `/olap-tab/msmdpump.dll` or `/olap-md/msmdpump.dll` |
-| `user`, `password` | yes | reader credentials |
+| `user`, `password` | usually | reader credentials; **not required** when `authMechanism` is `kerberos` or `negotiate`, which authenticate from the ambient ticket cache |
 | `catalog` | no | restrict to one catalog; otherwise all are discovered |
 | `authMechanism` | no | `basic` (default), `kerberos`, `negotiate`, `ntlm` |
 | `includeSampleData` | no | sample a few rows per tabular table (default `true`; set `false` to disable) |
@@ -258,7 +258,59 @@ or credential fails in the first log lines rather than part-way through ingestio
 
 The UI's **Test Connection** button is a separate mechanism — it runs a test-connection
 definition registered for the service type, and Custom Database ships none — in practice the
-button renders greyed out. For a custom connector the connection
+button renders greyed out.
+
+#### When the pipeline fails before it connects
+
+Two failures happen *before* any network call, so no amount of checking the host will explain
+them.
+
+**`AttributeError: 'NoneType' object has no attribute 'rsplit'`** in
+`metadata/utils/importer.py` means **`sourcePythonClass` is null** on the service. The field is
+optional in OpenMetadata's schema, so a Custom Database service saves happily without it and
+then dies in `set_steps()` — before `_get_source()`, before `test_connection()`, before
+anything touches the network. Set it to `ssas_om.source.SsasSource`. Confirm it round-tripped
+rather than trusting the form:
+
+```bash
+curl -s -H "Authorization: Bearer $OM_JWT_TOKEN" \
+  "$OM_HOST/api/v1/services/databaseServices/name/<service>" \
+  | jq '.connection.config | {sourcePythonClass, connectionOptions}'
+```
+
+**`ModuleNotFoundError: ssas_om`** means the connector is not installed in the ingestion image
+Airflow actually runs. Check it directly rather than inferring:
+
+```bash
+kubectl run -n <ns> --rm -it --restart=Never ssas-check \
+  --image=<your-ingestion-image> -- python -c "import ssas_om.source as s; print(s.SsasSource)"
+```
+
+#### Checking the pump from a Windows host
+
+The endpoint is `msmdpump.dll` — p-u-m-p. A misspelled path returns 404, which looks identical
+to "not deployed". This sends exactly what the connector sends:
+
+```powershell
+$body = @'
+<Envelope xmlns="http://schemas.xmlsoap.org/soap/envelope/"><Body><Discover xmlns="urn:schemas-microsoft-com:xml-analysis"><RequestType>DISCOVER_DATASOURCES</RequestType><Restrictions><RestrictionList/></Restrictions><Properties><PropertyList/></Properties></Discover></Body></Envelope>
+'@
+Invoke-WebRequest -Uri http://HOST/olap-tab/msmdpump.dll -Method Post -Body $body `
+  -Credential (Get-Credential) -ContentType 'text/xml; charset=utf-8' `
+  -Headers @{ SOAPAction = '"urn:schemas-microsoft-com:xml-analysis:Discover"' }
+```
+
+| response | meaning |
+|---|---|
+| 200 with `<row>` elements | working |
+| 401 | reached the pump; wrong credential or auth scheme |
+| 404 | wrong path, or the `.dll` handler is not mapped in that IIS app |
+| 500 / SOAP fault | pump reached but misconfigured — usually `msmdsrv.ini`'s `ServerName` |
+
+**Use the native port as a control.** Connect SSMS directly to the instance (2383 for a default
+instance, or the port pinned in `msmdsrv.ini` for a named one). If that works and the pump URL
+does not, Analysis Services is healthy and the fault is in IIS — which splits the problem in
+half before you touch OpenMetadata again. For a custom connector the connection
 test is the pipeline's own first step: trigger the ingestion once and read the log. To get an
 answer before touching the UI at all, `scripts/probe.py` reaches the same endpoint standalone
 (`requests` + stdlib, credentials from the environment); capturing scrubbed fixtures is its main

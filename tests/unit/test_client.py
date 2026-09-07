@@ -44,3 +44,31 @@ def test_auth_mechanism_selection():
     assert _requests_auth("basic", "u", "p") == ("u", "p")
     with _pytest.raises(ValueError):
         _requests_auth("saml", "u", "p")
+
+
+def test_kerberos_accepts_empty_credentials():
+    """The mechanism authenticates from the ambient ticket cache, so the Source no
+    longer demands credentials for it -- requiring them forced a dummy pair into the
+    service config where it sat in clear text doing nothing.
+
+    With the extra absent this reaches the install-hint error rather than failing on
+    the empty credentials, which is exactly the point: user/password are never
+    consulted on this path.
+    """
+    import pytest
+
+    from ssas_om.client import _requests_auth
+
+    try:
+        handler = _requests_auth("kerberos", "", "")
+    except RuntimeError as exc:
+        assert "[kerberos]" in str(exc)  # got past credentials to the extra check
+    else:
+        assert handler is not None
+        del pytest
+
+
+def test_basic_still_uses_both():
+    from ssas_om.client import _requests_auth
+
+    assert _requests_auth("basic", "u", "p") == ("u", "p")
