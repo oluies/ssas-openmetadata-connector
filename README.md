@@ -146,6 +146,13 @@ export OM_JWT_TOKEN=...        # e.g. admin login token from your OM instance
 ./scripts/run-ingestion.sh config/ingestion-mssql.yaml.tmpl
 ```
 
+> **Upgrading an existing stack?** This is a clean-start recipe. `mysql` bind-mounts
+> `./docker-volume/db-data`, so if that directory was written by a 1.13.3 stack,
+> `execute-migrate-all` will run 2.0.1 schema migrations over it and the `db` image bump
+> may carry a MySQL server upgrade across the same datadir. Back it up first, or
+> `rm -rf docker-volume/db-data` for a genuinely clean start. The 2.0.1 stack has not been
+> exercised against a 1.13.3 datadir here.
+
 The result in OpenMetadata: database services `ssas_tabular`, `ssas_md`, and `hetzner_mssql`,
 with the SSAS tables linked to their SQL source.
 
