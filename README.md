@@ -347,8 +347,8 @@ logged-in Windows identity (true Windows SSPI works only if the connector runs o
      authMechanism: kerberos      # or: negotiate | ntlm | basic
      host: "https://ssas-host.domain.com"   # HTTPS for integrated auth
      endpoint: "/olap-tab/msmdpump.dll"
-     user: "svc_account"          # used by ntlm; ignored by kerberos ticket auth
-     password: "..."
+     # No user/password: kerberos and negotiate authenticate from the ambient
+     # ticket cache. For ntlm, add user in DOMAIN\\user form plus password.
    ```
 
 Requesting `kerberos`/`ntlm` without the matching extra installed raises a clear error naming

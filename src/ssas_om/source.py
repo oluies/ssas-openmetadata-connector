@@ -121,6 +121,13 @@ class SsasSource(Source):
             user = str(opts.get("user", ""))
             password = str(opts.get("password", ""))
         else:
+            missing = [k for k in ("user", "password") if not opts.get(k)]
+            if missing:
+                raise KeyError(
+                    f"connectionOptions is missing {' and '.join(missing)}, which "
+                    f"authMechanism={mech!r} requires. Only kerberos and negotiate "
+                    f"authenticate without them, from the ambient ticket cache."
+                )
             user = str(opts["user"])
             password = str(opts["password"])
         self.client = XmlaClient(

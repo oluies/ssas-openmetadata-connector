@@ -55,8 +55,6 @@ def test_kerberos_accepts_empty_credentials():
     the empty credentials, which is exactly the point: user/password are never
     consulted on this path.
     """
-    import pytest
-
     from ssas_om.client import _requests_auth
 
     try:
@@ -65,7 +63,6 @@ def test_kerberos_accepts_empty_credentials():
         assert "[kerberos]" in str(exc)  # got past credentials to the extra check
     else:
         assert handler is not None
-        del pytest
 
 
 def test_basic_still_uses_both():

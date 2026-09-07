@@ -74,9 +74,13 @@ jobs:
       # bypassed hook or a rebase cannot let a host, IP, SID or connection string
       # through. Constitution principle I is NON-NEGOTIABLE and fixtures are
       # committed, so this belongs in CI and not only in a local hook.
+      # Runs the hook itself, not a sed-rewritten copy: a rewrite that stops
+      # matching yields a gate that scans nothing and exits 0.
       - name: leak gate over all tracked files
-        run: |
-          sed 's#git diff --cached --name-only --diff-filter=ACM#git ls-files#' \
-            .githooks/pre-commit > /tmp/gate.sh
-          chmod +x /tmp/gate.sh
-          /tmp/gate.sh
+        env:
+          LEAK_GATE_FILES_CMD: git ls-files
+        run: .githooks/pre-commit
+      # The gate's boundary is pinned in the tree, both directions: an image tag
+      # must pass, a file path carrying a real address must not.
+      - name: leak gate boundary cases
+        run: ./tests/hooks/test_leak_gate.sh
