@@ -41,7 +41,7 @@ flowchart LR
     end
     subgraph Local["Local Docker"]
         conn["ssas_om connector\n(in the ingestion image)"]
-        om["OpenMetadata 1.13.3"]
+        om["OpenMetadata 2.0.1"]
     end
     conn -- "XMLA / HTTP Basic|Kerberos|NTLM" --> pumpT
     conn -- "XMLA / HTTP" --> pumpM
@@ -113,7 +113,7 @@ flowchart TD
 ```
 
 - **Dev (this repo):** `scripts/run-ingestion.sh` bind-mounts `src/` into
-  `openmetadata/ingestion:1.13.3` with `PYTHONPATH=/opt/connector` and runs
+  `openmetadata/ingestion:2.0.1.0` with `PYTHONPATH=/opt/connector` and runs
   `metadata ingest`. Zero build step.
 - **Prod:** build a thin image `FROM docker.getcollate.io/openmetadata/ingestion:2.0.1.0`
   that installs the connector, and point your OpenMetadata ingestion pipeline at it.
@@ -135,7 +135,7 @@ The package builds a normal wheel: `python -m build` (hatchling). Optional extra
 
 ```bash
 cp .env.example .env          # fill in host / user / password
-docker compose -f docker/compose.yml up -d openmetadata-server   # OM 1.13.3 + deps
+docker compose -f docker/compose.yml up -d openmetadata-server   # OM 2.0.1 + deps
 
 # an ingestion-bot / admin JWT for the metadata-rest sink:
 export OM_JWT_TOKEN=...        # e.g. admin login token from your OM instance
@@ -334,7 +334,7 @@ uvx ty check                   # type checker (SDK-free core; source.py is the S
 
 Full coverage (including the `SsasSource` tests) runs where the OpenMetadata SDK is present —
 e.g. inside the ingestion image. CI runs all three: `ruff` + `ty`, the hermetic suite on
-Python 3.10-3.12, and the full suite inside `openmetadata/ingestion:1.13.3`. No fixture, log, or commit ever contains a host, IP,
+Python 3.10-3.12, and the full suite inside `openmetadata/ingestion:2.0.1.0`. No fixture, log, or commit ever contains a host, IP,
 username, machine name, SID or connection string (enforced by a pre-commit leak-gate).
 
 ## Repository layout
@@ -342,7 +342,7 @@ username, machine name, SID or connection string (enforced by a pre-commit leak-
 ```
 src/ssas_om/        connector: client, parsers (csdl, mdschema), mappers, source, redaction
 config/             committed ingestion templates (no secrets)
-docker/             OpenMetadata 1.13.3 compose + a fixture stub server
+docker/             OpenMetadata 2.0.1 compose + a fixture stub server
 scripts/            probe.py (discovery) and run-ingestion.sh
 tests/              offline unit tests + recorded fixtures
 specs/, docs/       spec-kit artefacts, discovery report, normative references

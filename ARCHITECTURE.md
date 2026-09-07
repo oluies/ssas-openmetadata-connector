@@ -151,13 +151,13 @@ flowchart LR
     fixtures --> stub["docker/ssas-stub\nreplays fixtures"]
     unit --> gate["offline gate:\nno network, no leaks"]
     stub --> integ["integration without the host"]
-    live["live SSAS + OM 1.13.3"] --> accept["acceptance run only"]
+    live["live SSAS + OM 2.0.1"] --> accept["acceptance run only"]
 ```
 
 - **Unit** — every parser/mapper/client path against fixtures, with `pytest-socket` blocking
   all sockets. A pattern-based leak-check asserts no fixture carries an identifying token.
 - **Integration** — the stub server replays fixtures so the pipeline can run with no host.
-- **Acceptance** — a real ingestion into a live OpenMetadata 1.13.3, used to prove the
+- **Acceptance** — a real ingestion into a live OpenMetadata 2.0.1, used to prove the
   end-to-end result; never a prerequisite for the unit suite (the operator IP is allowlisted
   and changes).
 
