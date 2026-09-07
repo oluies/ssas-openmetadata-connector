@@ -207,6 +207,64 @@ into a `0600`, auto-deleted runtime file.
 | `sampleDataRowCount` | no | max rows to sample per table (default `50`) |
 | `lineageService` / `lineageDatabase` / `lineageSchema` | no | link tables to a SQL source (schema default `dbo`) |
 
+### Configuring from the OpenMetadata UI
+
+The `config/` templates are the scripted path, not a requirement. A custom connector is an
+ordinary **Custom Database** service in OpenMetadata, so the same settings can be entered in
+the UI and scheduled from there.
+
+What the UI cannot do is install the connector. `ssas_om` has to be importable in the
+ingestion runtime Airflow uses, so build a derived image first (see
+[How it is installed and distributed](#how-it-is-installed-and-distributed)) and point your
+deployment's ingestion container at it. Skip that step and the service saves happily — the
+pipeline then fails at import with `ModuleNotFoundError: ssas_om`.
+
+With the image in place: **Settings → Services → Databases → Add New Service → Custom
+Database**.
+
+| UI field | value |
+|---|---|
+| Source Python Class | `ssas_om.source.SsasSource` |
+| Connection Options | the key/value pairs from the table above |
+
+Add a **Metadata** ingestion pipeline to the service and schedule it. OpenMetadata generates
+the same workflow YAML internally and hands it to Airflow.
+
+Every value in that form is a string, which is why the templates quote
+`includeSampleData: "true"` and `sampleDataRowCount: "50"`. The connector parses them
+permissively (`_as_bool` / `_as_int` in `source.py`), so `true`, `True` and `yes` all work.
+
+Two things the YAML path still does better:
+
+- **The password is not a secret field.** `connectionOptions` is a plain string map in the
+  OpenMetadata schema with no password format, so the SSAS password is stored as an ordinary
+  option value — not with the masking and secret-manager handling a built-in connector's
+  password field gets. `run-ingestion.sh` at least confines it to a `0600` file it deletes on
+  exit.
+- **`run-ingestion.sh` is invisible to the UI.** It bind-mounts `src/` into a throwaway
+  `docker run`, whereas a UI-triggered pipeline runs in Airflow's own container. Editing the
+  code changes nothing about a scheduled run until the derived image is rebuilt.
+
+The MSSQL lineage source is a built-in connector, so it needs no such prerequisite: pick
+**SQL Server** in the same menu and mirror `config/ingestion-mssql.yaml.tmpl`.
+
+#### Testing the connection
+
+The connector implements `test_connection()` (`src/ssas_om/source.py`): a
+`DISCOVER_DATASOURCES` probe, chosen because a least-privilege reader can issue it without any
+admin-gated request. A 401, 403 or SOAP fault raises `ConnectionError` carrying the HTTP status
+and the fault string. The SDK calls it at the start of the workflow, so a wrong host, endpoint
+or credential fails in the first log lines rather than part-way through ingestion.
+
+The UI's **Test Connection** button is a separate mechanism — it runs a test-connection
+definition registered for the service type, and Custom Database ships none — in practice the
+button renders greyed out. For a custom connector the connection
+test is the pipeline's own first step: trigger the ingestion once and read the log. To get an
+answer before touching the UI at all, `scripts/probe.py` reaches the same endpoint standalone
+(`requests` + stdlib, credentials from the environment); capturing scrubbed fixtures is its main
+job, but it will not get past `DISCOVER_DATASOURCES` if the endpoint or the reader account is
+wrong.
+
 ### Security models
 
 `basic` (HTTP Basic) is built in and needs no extra dependency. **Kerberos / Negotiate /
