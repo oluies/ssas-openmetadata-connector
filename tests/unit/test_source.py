@@ -225,3 +225,70 @@ def test_sample_data_can_be_disabled():
                             "reader", "pw", transport=_sample_transport)
     list(src._iter())
     src.metadata.ingest_table_sample_data.assert_not_called()
+
+
+# --- credential handling by authMechanism -------------------------------------
+# These exercise the change directly rather than _requests_auth, which ignored
+# user/password for kerberos both before and after -- so a test against it would
+# have passed on the pre-change tree and proved nothing.
+
+def _config(options: dict) -> dict:
+    return {
+        "type": "customDatabase",
+        "serviceName": "ssas_tabular",
+        "serviceConnection": {
+            "config": {
+                "type": "CustomDatabase",
+                "sourcePythonClass": "ssas_om.source.SsasSource",
+                "connectionOptions": options,
+            }
+        },
+        "sourceConfig": {"config": {"type": "DatabaseMetadata"}},
+    }
+
+
+_BASE = {"host": "http://ssas.internal", "endpoint": "/olap-tab/msmdpump.dll"}
+
+
+@pytest.mark.parametrize("mechanism", ["kerberos", "negotiate"])
+def test_ticket_mechanisms_get_past_the_credential_check(mechanism):
+    """Previously raised KeyError: 'user' before authMechanism was even read, so a
+    Kerberos deployment had to put a dummy credential in the service config -- in
+    clear text, and not the credential actually used.
+
+    Without the [kerberos] extra installed the constructor still fails, but on the
+    missing-extra message rather than on credentials. That distinction IS the fix:
+    it proves user/password are no longer consulted on this path. Where the extra
+    is present, construction succeeds outright.
+    """
+    try:
+        src = SsasSource.create(_config({**_BASE, "authMechanism": mechanism}), MagicMock())
+    except RuntimeError as exc:
+        assert "extra" in str(exc)          # got past credentials to the dependency check
+        assert "user" not in str(exc)
+    except KeyError as exc:                  # the pre-fix behaviour
+        pytest.fail(f"still demands credentials for {mechanism}: {exc}")
+    else:
+        assert src.client is not None
+
+
+@pytest.mark.parametrize("mechanism", ["basic", "ntlm"])
+def test_password_mechanisms_still_require_credentials(mechanism):
+    with pytest.raises(KeyError) as excinfo:
+        SsasSource.create(_config({**_BASE, "authMechanism": mechanism}), MagicMock())
+    message = str(excinfo.value)
+    assert "user" in message and "password" in message
+    assert mechanism in message  # names the mechanism, not a bare KeyError
+
+
+def test_default_mechanism_is_basic_and_requires_credentials():
+    with pytest.raises(KeyError, match="basic"):
+        SsasSource.create(_config(dict(_BASE)), MagicMock())
+
+
+def test_basic_auth_source_constructs_with_credentials():
+    """The ordinary path still works -- the guard did not break it."""
+    src = SsasSource.create(
+        _config({**_BASE, "user": "reader", "password": "pw"}), MagicMock()
+    )
+    assert src.client is not None

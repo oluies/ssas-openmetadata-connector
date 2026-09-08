@@ -265,7 +265,11 @@ or credential fails in the first log lines rather than part-way through ingestio
 
 The UI's **Test Connection** button is a separate mechanism — it runs a test-connection
 definition registered for the service type, and Custom Database ships none — in practice the
-button renders greyed out.
+button renders greyed out. For a custom connector the connection test is the pipeline's own
+first step: trigger the ingestion once and read the log. To get an answer before touching the
+UI at all, `scripts/probe.py` reaches the same endpoint standalone (`requests` + stdlib,
+credentials from the environment); capturing scrubbed fixtures is its main job, but it will
+not get past `DISCOVER_DATASOURCES` if the endpoint or the reader account is wrong.
 
 #### When the pipeline fails before it connects
 
@@ -317,12 +321,7 @@ Invoke-WebRequest -Uri http://HOST/olap-tab/msmdpump.dll -Method Post -Body $bod
 **Use the native port as a control.** Connect SSMS directly to the instance (2383 for a default
 instance, or the port pinned in `msmdsrv.ini` for a named one). If that works and the pump URL
 does not, Analysis Services is healthy and the fault is in IIS — which splits the problem in
-half before you touch OpenMetadata again. For a custom connector the connection
-test is the pipeline's own first step: trigger the ingestion once and read the log. To get an
-answer before touching the UI at all, `scripts/probe.py` reaches the same endpoint standalone
-(`requests` + stdlib, credentials from the environment); capturing scrubbed fixtures is its main
-job, but it will not get past `DISCOVER_DATASOURCES` if the endpoint or the reader account is
-wrong.
+half before you touch OpenMetadata again.
 
 ### Security models
 
