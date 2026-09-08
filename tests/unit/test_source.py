@@ -292,3 +292,60 @@ def test_basic_auth_source_constructs_with_credentials():
         _config({**_BASE, "user": "reader", "password": "pw"}), MagicMock()
     )
     assert src.client is not None
+
+
+# --- the default mechanism follows the transport -------------------------------
+# HTTP Basic is msmdpump's IIS front end; the native binding speaks GSS-API only.
+# A single global default would make one of the two transports fail on a setting
+# the operator never wrote.
+
+_TCP_BASE = {"host": "ssas.internal", "transport": "tcp", "port": "2383"}
+
+
+def test_tcp_defaults_to_kerberos_and_asks_for_no_credentials():
+    """With no authMechanism the tcp path must reach the connect attempt, not stop
+    on a missing user/password -- which is what a 'basic' default would have done."""
+    try:
+        SsasSource.create(_config(dict(_TCP_BASE)), MagicMock())
+    except KeyError as exc:
+        pytest.fail(f"tcp default still demands credentials: {exc}")
+    except (RuntimeError, OSError, ConnectionError):
+        pass  # missing [tcp] extra, or no server -- both are past the config check
+
+
+def test_tcp_rejects_basic_before_touching_the_network():
+    from ssas_om.tcp_client import resolve_mechanism  # noqa: F401  (documents the origin)
+
+    with pytest.raises(ValueError, match="basic"):
+        SsasSource.create(
+            _config({**_TCP_BASE, "authMechanism": "basic",
+                     "user": "reader", "password": "pw"}),
+            MagicMock(),
+        )
+
+
+def test_tcp_requires_a_pinned_port():
+    """There is no default: guessing between a default instance's well-known port
+    and a named instance's pinned one presents to the operator as a hang."""
+    with pytest.raises(KeyError, match="port"):
+        SsasSource.create(
+            _config({"host": "ssas.internal", "transport": "tcp"}), MagicMock()
+        )
+
+
+def test_unknown_transport_is_rejected():
+    with pytest.raises(ValueError, match="carrier"):
+        SsasSource.create(
+            _config({**_BASE, "transport": "carrier", "user": "r", "password": "p"}),
+            MagicMock(),
+        )
+
+
+def test_http_still_demands_an_endpoint_and_says_which_option():
+    """Relaxing `endpoint` for tcp must not make it optional for http, where a
+    missing msmdpump path would otherwise POST to the bare host."""
+    with pytest.raises(KeyError, match="endpoint"):
+        SsasSource.create(
+            _config({"host": "http://ssas.internal", "user": "r", "password": "p"}),
+            MagicMock(),
+        )

@@ -30,6 +30,40 @@ def _restrictions_to_mapping(restrictions: str) -> dict[str, str]:
     return {m.group(1): m.group(2) for m in _RESTRICTION.finditer(restrictions or "")}
 
 
+# The native binding speaks GSS-API only. `basic` is msmdpump's IIS front end and
+# has no counterpart here.
+TCP_MECHANISMS = ("kerberos", "negotiate", "ntlm")
+
+
+def resolve_mechanism(auth_mechanism: str | None, password: str) -> str:
+    """Normalise `authMechanism` for the native binding, or say why it cannot be.
+
+    Rejecting rather than coercing is the point. An earlier version mapped
+    `basic` onto `kerberos`, which discarded the password the operator supplied
+    and authenticated as whoever happened to hold a ticket -- a *different
+    identity*, with no indication that it had happened.
+    """
+    mech = (auth_mechanism or "kerberos").lower()
+    if mech == "basic":
+        raise ValueError(
+            "authMechanism='basic' is not available on transport='tcp': the native "
+            "binding authenticates with GSS-API only. Use 'ntlm' to authenticate "
+            "with the configured user and password, or 'kerberos'/'negotiate' to "
+            "use the ambient ticket cache."
+        )
+    if mech not in TCP_MECHANISMS:
+        raise ValueError(
+            f"unknown authMechanism {auth_mechanism!r}; transport='tcp' accepts "
+            f"{', '.join(TCP_MECHANISMS)}"
+        )
+    if mech == "ntlm" and not password:
+        raise ValueError(
+            "authMechanism='ntlm' needs 'password' in connectionOptions: NTLM "
+            "derives its key from the password and cannot read a ticket cache."
+        )
+    return mech
+
+
 class TcpXmlaClient:
     """An `XmlaClient` work-alike speaking the native binding."""
 
@@ -43,6 +77,10 @@ class TcpXmlaClient:
         service: str = "MSOLAPSvc.3",
         timeout: float = 30.0,
     ) -> None:
+        # Validated before the import so a misconfiguration reports itself as one,
+        # whether or not the optional extra happens to be installed.
+        mech = resolve_mechanism(auth_mechanism, password)
+
         try:
             from ssas_xmla import Credential, connect
         except ImportError as exc:
@@ -51,14 +89,10 @@ class TcpXmlaClient:
             ) from exc
 
         self._scrub = make_scrubber(host=host, user=user or None)
-        mech = (auth_mechanism or "kerberos").lower()
-        if mech in ("negotiate", "basic"):
-            # There is no HTTP Basic on this binding, and negotiate resolves to a
-            # ticket mechanism. Say so rather than failing obscurely later.
-            mech = "kerberos"
         credential = Credential(mechanism=mech, principal=user or None, service=service)
-        # kerberos authenticates from the ambient ticket cache and ignores the
-        # password; it is only consulted for ntlm against a standalone server.
+        # kerberos/negotiate authenticate from the ambient ticket cache and ignore
+        # the password; it is only consulted for ntlm, which is what a domain
+        # account against a standalone or non-SPN-registered server falls back to.
         self._session = connect(
             host,
             port,

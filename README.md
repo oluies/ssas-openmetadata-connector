@@ -205,17 +205,49 @@ into a `0600`, auto-deleted runtime file.
 
 | option | required | meaning |
 |---|---|---|
-| `host` | yes | e.g. `http://ssas-host` |
-| `endpoint` | yes | `/olap-tab/msmdpump.dll` or `/olap-md/msmdpump.dll` |
-| `user`, `password` | usually | reader credentials; **not required** when `authMechanism` is `kerberos` or `negotiate`, which authenticate from the ambient ticket cache |
+| `host` | yes | `http://ssas-host` for `transport: http`; a bare hostname is accepted for `transport: tcp`, where the scheme and path are stripped |
+| `endpoint` | for `http` | `/olap-tab/msmdpump.dll` or `/olap-md/msmdpump.dll` |
+| `transport` | no | `http` (default, via `msmdpump`) or `tcp` (native binding, no IIS) |
+| `port` | for `tcp` | the instance's **pinned** TCP port; required when `transport: tcp`, with no default |
+| `authMechanism` | no | `basic`, `kerberos`, `negotiate`, `ntlm` — see the table below; the **default follows the transport** (`basic` for `http`, `kerberos` for `tcp`) |
+| `user`, `password` | for `basic` / `ntlm` | reader credentials; **not required** when `authMechanism` is `kerberos` or `negotiate`, which authenticate from the ambient ticket cache |
+| `servicePrincipalClass` | no | SPN service class for Kerberos, default `MSOLAPSvc.3` |
 | `catalog` | no | restrict to one catalog; otherwise all are discovered |
-| `authMechanism` | no | `basic` (default), `kerberos`, `negotiate`, `ntlm` |
 | `includeSampleData` | no | sample a few rows per tabular table (default `true`; set `false` to disable) |
 | `sampleDataRowCount` | no | max rows to sample per table (default `50`) |
 | `lineageService` / `lineageDatabase` / `lineageSchema` | no | link tables to a SQL source (schema default `dbo`) |
-| `transport` | no | `http` (default, via `msmdpump`) or `tcp` (native binding, no IIS) |
-| `port` | for `tcp` | the instance's **pinned** TCP port; required when `transport: tcp` |
-| `servicePrincipalClass` | no | SPN service class for Kerberos, default `MSOLAPSvc.3` |
+
+### Choosing `authMechanism`
+
+The two bindings do not offer the same mechanisms, which is the one place they are not
+interchangeable. HTTP Basic is a property of the IIS front end msmdpump runs behind; the
+native binding authenticates with GSS-API and has nothing to fall back to. So the connector
+**defaults the mechanism to the transport** rather than to a single global value, and
+`transport: tcp` with `authMechanism: basic` is rejected at construction instead of being
+quietly turned into a ticket login as some other identity.
+
+| `authMechanism` | `transport: http` | `transport: tcp` | credential it uses |
+|---|---|---|---|
+| `basic` | ✅ default | ❌ rejected | `user` + `password`, sent to IIS |
+| `ntlm` | ✅ | ✅ | `user` + `password` — both required |
+| `kerberos` | ✅ | ✅ default | the ambient ticket cache; `user`/`password` ignored |
+| `negotiate` | ✅ | ✅ | the ambient ticket cache; `user`/`password` ignored |
+
+**A domain service account is the common production case, and it maps to `ntlm` or
+`kerberos` depending on what the ingestion container has, not on what the account is:**
+
+- If the container has a Kerberos ticket (a keytab and a `kinit`, or a mounted `KRB5CCNAME`),
+  use `kerberos` and leave `password` out entirely. This is the better answer — no password
+  is stored in `connectionOptions`, which is not a secret field (see below).
+- If it does not, use `ntlm` with the domain account's `user` and `password`. NTLM derives
+  its key from the password and cannot read a ticket cache, so `ntlm` without a `password`
+  is rejected rather than silently attempted.
+- `negotiate` lets the mechanism be chosen at handshake time. It needs the same ticket
+  cache as `kerberos`, so it is not a way to avoid one.
+
+Kerberos additionally needs the server's SPN to resolve. `servicePrincipalClass` sets the
+service class in the SPN the client asks for (`MSOLAPSvc.3/host`); change it only if your
+instance is registered under a different class.
 
 ### Configuring from the OpenMetadata UI
 

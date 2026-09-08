@@ -107,7 +107,12 @@ source, confirm the path from measure to source table is traversable in the cata
 - **FR-008**: Extraction MUST be testable offline against recorded definitions, with no live
   server.
 - **FR-009**: The feature MUST be able to be turned off, so a site that does not want
-  expressions in its catalogue need not have them.
+  expressions in its catalogue need not have them. The two halves MUST be separately
+  controllable, because they disclose different things: the definition is the site's business
+  logic in plain text, whereas an input edge names only columns the catalogue already lists.
+- **FR-009a**: Both controls MUST be ordinary connector settings, carried the same way as
+  every existing one, and MUST be safe by default in the sense that turning them off yields
+  exactly the previous catalogue (SC-006).
 - **FR-010**: A measure whose definition cannot be read MUST NOT fail the ingestion of the rest
   of the model.
 
@@ -136,6 +141,23 @@ source, confirm the path from measure to source table is traversable in the cata
 - **SC-005**: Measures whose inputs could not be determined are identifiable as such, and their
   proportion is reportable after an ingestion.
 - **SC-006**: Turning the feature off produces the same catalogue as before the feature existed.
+
+## Configuration
+
+The connector is configured through `connectionOptions`, a flat string map (see the option
+table in `README.md`); every value arrives as a string and is parsed permissively, so these
+follow that convention rather than inventing a second mechanism.
+
+| option | default | meaning |
+|---|---|---|
+| `includeMeasureDefinitions` | `true` | store each measure's expression verbatim (User Story 2). Set `false` at a site that considers its measure logic sensitive; the measure is still catalogued, without its formula. |
+| `includeMeasureLineage` | `true` | derive and emit column → measure edges (User Story 1). Requires `includeMeasureDefinitions`, since the expression is what gets parsed; the connector MUST reject the combination rather than silently emitting nothing. |
+
+Both off is the pre-feature behaviour, which is what SC-006 measures.
+
+No new credential or endpoint setting is needed: definitions come from rowsets the connector
+already reads with the same reader account, over whichever `transport` is configured. See
+`docs/extracting-definitions.md`.
 
 ## Assumptions
 

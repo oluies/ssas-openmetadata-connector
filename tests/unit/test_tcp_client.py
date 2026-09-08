@@ -111,3 +111,52 @@ def test_dmv_builds_the_system_rowset_query():
 
     _adapter_with(Recording()).dmv("MDSCHEMA_CUBES", catalog="AWMultidim")
     assert seen["statement"] == "SELECT * FROM $SYSTEM.MDSCHEMA_CUBES"
+
+
+# --- authMechanism on the native binding --------------------------------------
+# The two bindings do not offer the same set of mechanisms, which is the one place
+# they are not interchangeable. These run without the [tcp] extra because
+# resolve_mechanism is checked before the optional import.
+
+def test_basic_is_rejected_rather_than_coerced_to_a_ticket_login():
+    """The earlier version mapped basic -> kerberos, which discarded the supplied
+    password and authenticated as whoever held a ticket. A silently different
+    identity is worse than a refusal, so the refusal is the tested behaviour."""
+    from ssas_om.tcp_client import resolve_mechanism
+
+    with pytest.raises(ValueError) as excinfo:
+        resolve_mechanism("basic", "pw")
+    message = str(excinfo.value)
+    assert "basic" in message
+    assert "ntlm" in message and "kerberos" in message  # names the alternatives
+
+
+def test_unknown_mechanism_names_the_accepted_set():
+    from ssas_om.tcp_client import resolve_mechanism
+
+    with pytest.raises(ValueError, match="digest"):
+        resolve_mechanism("digest", "pw")
+
+
+def test_ntlm_without_a_password_is_refused():
+    """NTLM derives its key from the password and cannot read a ticket cache, so
+    an empty password would fail at the handshake with a far less useful error."""
+    from ssas_om.tcp_client import resolve_mechanism
+
+    with pytest.raises(ValueError, match="password"):
+        resolve_mechanism("ntlm", "")
+
+
+@pytest.mark.parametrize("mechanism", ["kerberos", "negotiate"])
+def test_ticket_mechanisms_need_no_password(mechanism):
+    from ssas_om.tcp_client import resolve_mechanism
+
+    assert resolve_mechanism(mechanism, "") == mechanism
+
+
+def test_mechanism_is_case_insensitive_and_defaults_to_kerberos():
+    from ssas_om.tcp_client import resolve_mechanism
+
+    assert resolve_mechanism("NTLM", "pw") == "ntlm"
+    assert resolve_mechanism(None, "") == "kerberos"
+    assert resolve_mechanism("", "") == "kerberos"
