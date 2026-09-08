@@ -428,6 +428,13 @@ logged-in Windows identity (true Windows SSPI works only if the connector runs o
      # ticket cache. For ntlm, add user in DOMAIN\\user form plus password.
    ```
 
+Running this **in Kubernetes** is a separate problem from configuring it: the OpenMetadata
+`omjob-operator` shapes ingestion pods from `OMJob.spec.mainPodSpec`, which has no `volumes` or
+`initContainers` field, and the stock ingestion image cannot do Kerberos at all (it ships
+`kinit` and `libkrb5` but not python-`gssapi`). See
+[`docs/kerberos-in-kubernetes.md`](docs/kerberos-in-kubernetes.md) for what that rules out, the
+Kyverno route that works around it, and why `ntlm` is the sensible first step.
+
 Requesting `kerberos`/`ntlm` without the matching extra installed raises a clear error naming
 the missing extra. The connector never logs request bodies or the `Authorization` header.
 Basic over plain HTTP sends credentials in clear text — use it only behind a network
