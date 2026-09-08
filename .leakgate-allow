@@ -1,0 +1,16 @@
+# Binary files the leak gate cannot scan, reviewed by eye and recorded here.
+#
+# The gate refuses binaries by default because grep -I skips them, so it would
+# otherwise report CLEAN on a file it never read -- which is exactly how a
+# coverage database carrying absolute home-directory paths reached a public repo.
+#
+# Adding a path here is a statement that a human looked at the file. For a UI
+# screenshot that means checking for a hostname or address in a URL bar, a
+# connection panel, a tooltip or a breadcrumb.
+#
+# Reviewed 2026-09-08: all three show only service and catalog names
+# (ssas_md, ssas_tabular, AWMultidim, AWTabular, AWCube) and public
+# AdventureWorks sample data. No hostname, address, URL bar or credential.
+docs/images/openmetadata-explore-tree.png
+docs/images/openmetadata-sample-data.png
+docs/images/openmetadata-table-columns.png

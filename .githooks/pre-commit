@@ -24,11 +24,23 @@ while IFS= read -r f; do
   # Binary files are INVISIBLE to this gate: grep -I skips them, so every check
   # below silently passes. A coverage database reached a public repo that way,
   # carrying 22 absolute paths from the author's home directory. Refuse binaries
-  # outright rather than pretend to have scanned them.
-  if ! grep -qI . "$f" 2>/dev/null; then
-    echo "leak-gate: binary file cannot be scanned, refusing: $f" >&2
-    echo "  if it is genuinely safe, add it to .gitignore or scan it by hand" >&2
-    leak=1
+  # rather than pretend to have scanned them.
+  #
+  # An EMPTY file is not binary, it is empty -- `grep -qI .` finds no matching
+  # line in one, so py.typed and __init__.py were briefly refused. Skip them:
+  # there is nothing in them to leak.
+  #
+  # Binaries that have been reviewed by eye are listed in .leakgate-allow, one
+  # path per line. Screenshots are the usual case, and they DO need review: a UI
+  # capture can show a hostname or address in a URL bar or a connection panel.
+  if [ -s "$f" ] && ! grep -qI . "$f" 2>/dev/null; then
+    if [ -f .leakgate-allow ] && grep -qxF "$f" .leakgate-allow 2>/dev/null; then
+      : # reviewed by hand and recorded
+    else
+      echo "leak-gate: binary file cannot be scanned, refusing: $f" >&2
+      echo "  review it by eye, then add its path to .leakgate-allow" >&2
+      leak=1
+    fi
     continue
   fi
 
