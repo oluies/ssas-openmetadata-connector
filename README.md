@@ -41,7 +41,7 @@ flowchart LR
     end
     subgraph Local["Local Docker"]
         conn["ssas_om connector\n(in the ingestion image)"]
-        om["OpenMetadata 1.13.3"]
+        om["OpenMetadata 2.0.1"]
     end
     conn -- "XMLA / HTTP Basic|Kerberos|NTLM" --> pumpT
     conn -- "XMLA / HTTP" --> pumpM
@@ -113,7 +113,7 @@ flowchart TD
 ```
 
 - **Dev (this repo):** `scripts/run-ingestion.sh` bind-mounts `src/` into
-  `openmetadata/ingestion:1.13.3` with `PYTHONPATH=/opt/connector` and runs
+  `openmetadata/ingestion:2.0.1.0` with `PYTHONPATH=/opt/connector` and runs
   `metadata ingest`. Zero build step.
 - **Prod:** build a thin image `FROM docker.getcollate.io/openmetadata/ingestion:2.0.1.0`
   that installs the connector, and point your OpenMetadata ingestion pipeline at it.
@@ -135,7 +135,7 @@ The package builds a normal wheel: `python -m build` (hatchling). Optional extra
 
 ```bash
 cp .env.example .env          # fill in host / user / password
-docker compose -f docker/compose.yml up -d openmetadata-server   # OM 1.13.3 + deps
+docker compose -f docker/compose.yml up -d openmetadata-server   # OM 2.0.1 + deps
 
 # an ingestion-bot / admin JWT for the metadata-rest sink:
 export OM_JWT_TOKEN=...        # e.g. admin login token from your OM instance
@@ -145,6 +145,13 @@ export OM_JWT_TOKEN=...        # e.g. admin login token from your OM instance
 # the built-in MSSQL source (lineage target):
 ./scripts/run-ingestion.sh config/ingestion-mssql.yaml.tmpl
 ```
+
+> **Upgrading an existing stack?** This is a clean-start recipe. `mysql` bind-mounts
+> `./docker-volume/db-data`, so if that directory was written by a 1.13.3 stack,
+> `execute-migrate-all` will run 2.0.1 schema migrations over it and the `db` image bump
+> may carry a MySQL server upgrade across the same datadir. Back it up first, or
+> `rm -rf docker-volume/db-data` for a genuinely clean start. The 2.0.1 stack has not been
+> exercised against a 1.13.3 datadir here.
 
 The result in OpenMetadata: database services `ssas_tabular`, `ssas_md`, and `hetzner_mssql`,
 with the SSAS tables linked to their SQL source.
@@ -200,12 +207,121 @@ into a `0600`, auto-deleted runtime file.
 |---|---|---|
 | `host` | yes | e.g. `http://ssas-host` |
 | `endpoint` | yes | `/olap-tab/msmdpump.dll` or `/olap-md/msmdpump.dll` |
-| `user`, `password` | yes | reader credentials |
+| `user`, `password` | usually | reader credentials; **not required** when `authMechanism` is `kerberos` or `negotiate`, which authenticate from the ambient ticket cache |
 | `catalog` | no | restrict to one catalog; otherwise all are discovered |
 | `authMechanism` | no | `basic` (default), `kerberos`, `negotiate`, `ntlm` |
 | `includeSampleData` | no | sample a few rows per tabular table (default `true`; set `false` to disable) |
 | `sampleDataRowCount` | no | max rows to sample per table (default `50`) |
 | `lineageService` / `lineageDatabase` / `lineageSchema` | no | link tables to a SQL source (schema default `dbo`) |
+
+### Configuring from the OpenMetadata UI
+
+The `config/` templates are the scripted path, not a requirement. A custom connector is an
+ordinary **Custom Database** service in OpenMetadata, so the same settings can be entered in
+the UI and scheduled from there.
+
+What the UI cannot do is install the connector. `ssas_om` has to be importable in the
+ingestion runtime Airflow uses, so build a derived image first (see
+[How it is installed and distributed](#how-it-is-installed-and-distributed)) and point your
+deployment's ingestion container at it. Skip that step and the service saves happily — the
+pipeline then fails at import with `ModuleNotFoundError: ssas_om`.
+
+With the image in place: **Settings → Services → Databases → Add New Service → Custom
+Database**.
+
+| UI field | value |
+|---|---|
+| Source Python Class | `ssas_om.source.SsasSource` |
+| Connection Options | the key/value pairs from the table above |
+
+Add a **Metadata** ingestion pipeline to the service and schedule it. OpenMetadata generates
+the same workflow YAML internally and hands it to Airflow.
+
+Every value in that form is a string, which is why the templates quote
+`includeSampleData: "true"` and `sampleDataRowCount: "50"`. The connector parses them
+permissively (`_as_bool` / `_as_int` in `source.py`), so `true`, `True` and `yes` all work.
+
+Two things the YAML path still does better:
+
+- **The password is not a secret field.** `connectionOptions` is a plain string map in the
+  OpenMetadata schema with no password format, so the SSAS password is stored as an ordinary
+  option value — not with the masking and secret-manager handling a built-in connector's
+  password field gets. `run-ingestion.sh` at least confines it to a `0600` file it deletes on
+  exit.
+- **`run-ingestion.sh` is invisible to the UI.** It bind-mounts `src/` into a throwaway
+  `docker run`, whereas a UI-triggered pipeline runs in Airflow's own container. Editing the
+  code changes nothing about a scheduled run until the derived image is rebuilt.
+
+The MSSQL lineage source is a built-in connector, so it needs no such prerequisite: pick
+**SQL Server** in the same menu and mirror `config/ingestion-mssql.yaml.tmpl`.
+
+#### Testing the connection
+
+The connector implements `test_connection()` (`src/ssas_om/source.py`): a
+`DISCOVER_DATASOURCES` probe, chosen because a least-privilege reader can issue it without any
+admin-gated request. A 401, 403 or SOAP fault raises `ConnectionError` carrying the HTTP status
+and the fault string. The SDK calls it at the start of the workflow, so a wrong host, endpoint
+or credential fails in the first log lines rather than part-way through ingestion.
+
+The UI's **Test Connection** button is a separate mechanism — it runs a test-connection
+definition registered for the service type, and Custom Database ships none — in practice the
+button renders greyed out. For a custom connector the connection test is the pipeline's own
+first step: trigger the ingestion once and read the log. To get an answer before touching the
+UI at all, `scripts/probe.py` reaches the same endpoint standalone (`requests` + stdlib,
+credentials from the environment); capturing scrubbed fixtures is its main job, but it will
+not get past `DISCOVER_DATASOURCES` if the endpoint or the reader account is wrong.
+
+#### When the pipeline fails before it connects
+
+Two failures happen *before* any network call, so no amount of checking the host will explain
+them.
+
+**`AttributeError: 'NoneType' object has no attribute 'rsplit'`** in
+`metadata/utils/importer.py` means **`sourcePythonClass` is null** on the service. The field is
+optional in OpenMetadata's schema, so a Custom Database service saves happily without it and
+then dies in `set_steps()` — before `_get_source()`, before `test_connection()`, before
+anything touches the network. Set it to `ssas_om.source.SsasSource`. Confirm it round-tripped
+rather than trusting the form:
+
+```bash
+curl -s -H "Authorization: Bearer $OM_JWT_TOKEN" \
+  "$OM_HOST/api/v1/services/databaseServices/name/<service>" \
+  | jq '.connection.config | {sourcePythonClass, connectionOptions}'
+```
+
+**`ModuleNotFoundError: ssas_om`** means the connector is not installed in the ingestion image
+Airflow actually runs. Check it directly rather than inferring:
+
+```bash
+kubectl run -n <ns> --rm -it --restart=Never ssas-check \
+  --image=<your-ingestion-image> -- python -c "import ssas_om.source as s; print(s.SsasSource)"
+```
+
+#### Checking the pump from a Windows host
+
+The endpoint is `msmdpump.dll` — p-u-m-p. A misspelled path returns 404, which looks identical
+to "not deployed". This sends exactly what the connector sends:
+
+```powershell
+$body = @'
+<Envelope xmlns="http://schemas.xmlsoap.org/soap/envelope/"><Body><Discover xmlns="urn:schemas-microsoft-com:xml-analysis"><RequestType>DISCOVER_DATASOURCES</RequestType><Restrictions><RestrictionList/></Restrictions><Properties><PropertyList/></Properties></Discover></Body></Envelope>
+'@
+Invoke-WebRequest -Uri http://HOST/olap-tab/msmdpump.dll -Method Post -Body $body `
+  -Credential (Get-Credential) -ContentType 'text/xml; charset=utf-8' `
+  -Headers @{ SOAPAction = '"urn:schemas-microsoft-com:xml-analysis:Discover"' }
+```
+
+| response | meaning |
+|---|---|
+| 200 with `<row>` elements | working |
+| 401 | reached the pump; wrong credential or auth scheme |
+| 404 | wrong path, or the `.dll` handler is not mapped in that IIS app |
+| 500 / SOAP fault | pump reached but misconfigured — usually `msmdsrv.ini`'s `ServerName` |
+
+**Use the native port as a control.** Connect SSMS directly to the instance (2383 for a default
+instance, or the port pinned in `msmdsrv.ini` for a named one). If that works and the pump URL
+does not, Analysis Services is healthy and the fault is in IIS — which splits the problem in
+half before you touch OpenMetadata again.
 
 ### Security models
 
@@ -237,8 +353,8 @@ logged-in Windows identity (true Windows SSPI works only if the connector runs o
      authMechanism: kerberos      # or: negotiate | ntlm | basic
      host: "https://ssas-host.domain.com"   # HTTPS for integrated auth
      endpoint: "/olap-tab/msmdpump.dll"
-     user: "svc_account"          # used by ntlm; ignored by kerberos ticket auth
-     password: "..."
+     # No user/password: kerberos and negotiate authenticate from the ambient
+     # ticket cache. For ntlm, add user in DOMAIN\\user form plus password.
    ```
 
 Requesting `kerberos`/`ntlm` without the matching extra installed raises a clear error naming
@@ -276,7 +392,7 @@ uvx ty check                   # type checker (SDK-free core; source.py is the S
 
 Full coverage (including the `SsasSource` tests) runs where the OpenMetadata SDK is present —
 e.g. inside the ingestion image. CI runs all three: `ruff` + `ty`, the hermetic suite on
-Python 3.10-3.12, and the full suite inside `openmetadata/ingestion:1.13.3`. No fixture, log, or commit ever contains a host, IP,
+Python 3.10-3.12, and the full suite inside `openmetadata/ingestion:2.0.1.0`. No fixture, log, or commit ever contains a host, IP,
 username, machine name, SID or connection string (enforced by a pre-commit leak-gate).
 
 ## Repository layout
@@ -284,7 +400,7 @@ username, machine name, SID or connection string (enforced by a pre-commit leak-
 ```
 src/ssas_om/        connector: client, parsers (csdl, mdschema), mappers, source, redaction
 config/             committed ingestion templates (no secrets)
-docker/             OpenMetadata 1.13.3 compose + a fixture stub server
+docker/             OpenMetadata 2.0.1 compose + a fixture stub server
 scripts/            probe.py (discovery) and run-ingestion.sh
 tests/              offline unit tests + recorded fixtures
 specs/, docs/       spec-kit artefacts, discovery report, normative references

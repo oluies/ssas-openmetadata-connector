@@ -112,11 +112,29 @@ class SsasSource(Source):
         self.include_sample_data = _as_bool(opts.get("includeSampleData"), True)
         self.sample_data_row_count = _as_int(opts.get("sampleDataRowCount"), 50)
         self.service_name = config.serviceName
+        mech = str(opts.get("authMechanism", "basic")).lower()
+        # kerberos/negotiate authenticate from the ambient ticket cache -- see
+        # _requests_auth, which ignores user/password for those mechanisms. Demanding
+        # them anyway forced a dummy credential into the service config, where it sat
+        # in clear text doing nothing. basic/ntlm still require both.
+        if mech in ("kerberos", "negotiate"):
+            user = str(opts.get("user", ""))
+            password = str(opts.get("password", ""))
+        else:
+            missing = [k for k in ("user", "password") if not opts.get(k)]
+            if missing:
+                raise KeyError(
+                    f"connectionOptions is missing {' and '.join(missing)}, which "
+                    f"authMechanism={mech!r} requires. Only kerberos and negotiate "
+                    f"authenticate without them, from the ambient ticket cache."
+                )
+            user = str(opts["user"])
+            password = str(opts["password"])
         self.client = XmlaClient(
             url=self.host + self.endpoint,
-            user=str(opts["user"]),
-            password=str(opts["password"]),
-            auth_mechanism=str(opts.get("authMechanism", "basic")),
+            user=user,
+            password=password,
+            auth_mechanism=mech,
         )
 
     @classmethod

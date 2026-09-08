@@ -9,6 +9,10 @@ import re
 from collections.abc import Callable
 
 _IPV4 = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
+# Standalone machine-name pattern. It must NOT depend on `user`: with Kerberos the
+# connector has no user to key `user_adjacent` on, and that was previously the only
+# path redacting the NetBIOS name.
+_NETBIOS = re.compile(r"\bWIN-[A-Z0-9]{6,}\b")
 _SID = re.compile(r"\bS-1-(?:\d+-)+\d+\b")
 _CONN = re.compile(
     r"(?i)(Data Source|Provider|Initial Catalog|User ID|Password|Server)=[^;<\"]*"
@@ -44,6 +48,7 @@ def make_scrubber(
                 text = re.sub(re.escape(m.group(1)), "<HOST>", text, flags=re.I)
         for pat, repl in literals:
             text = pat.sub(repl, text)
+        text = _NETBIOS.sub("<HOST>", text)
         text = _CONN.sub(r"\1=<SCRUBBED>", text)
         text = _IPV4.sub("<IP>", text)
         text = _SID.sub("<SID>", text)

@@ -1,0 +1,75 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard"
+  ],
+  "timezone": "Europe/Stockholm",
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "prConcurrentLimit": 3,
+  "labels": [
+    "dependencies"
+  ],
+  "packageRules": [
+    {
+      "description": "The OpenMetadata SDK pin is NOT a routine dependency. It must match the ingestion image the connector is installed into, and both series exist on PyPI, so a bump does not error -- pip silently downgrades or upgrades the SDK inside the image and breaks every other connector alongside this one. Any change here also requires docker/compose.yml, scripts/run-ingestion.sh and the constitution pin to move together. Dashboard-only, never automatic.",
+      "matchPackageNames": [
+        "openmetadata-ingestion"
+      ],
+      "dependencyDashboardApproval": true,
+      "addLabels": [
+        "needs-coordinated-bump"
+      ]
+    },
+    {
+      "description": "The ingestion container image is the other half of that same pin.",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "/openmetadata/"
+      ],
+      "dependencyDashboardApproval": true,
+      "addLabels": [
+        "needs-coordinated-bump"
+      ]
+    },
+    {
+      "description": "Dev tooling can group freely -- it cannot affect what the connector reads from a server. Matched by name, not depType: devDependencies is an npm concept and this project is pep621.",
+      "matchPackageNames": [
+        "pytest",
+        "pytest-socket",
+        "ruff",
+        "ty",
+        "lxml"
+      ],
+      "groupName": "dev tooling",
+      "automerge": false
+    },
+    {
+      "description": "GitHub Actions: group so CI churn is one PR, not six.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "groupName": "github actions",
+      "pinDigests": false
+    }
+  ],
+  "pip_requirements": {
+    "enabled": true
+  },
+  "pep621": {
+    "enabled": true
+  },
+  "vulnerabilityAlerts": {
+    "labels": [
+      "security"
+    ],
+    "schedule": [
+      "at any time"
+    ]
+  }
+}
