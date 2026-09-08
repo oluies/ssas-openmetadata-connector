@@ -20,3 +20,7 @@ venv/
 .run-ingestion.yaml
 docker/docker-volume/
 docker-volume/
+
+# build output and the packaging job's throwaway venv
+dist/
+.pkgcheck/

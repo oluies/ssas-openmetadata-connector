@@ -25,6 +25,56 @@ jobs:
       - name: ty (Astral type checker; SDK-free core, source.py is the SDK boundary)
         run: uvx --with requests ty@0.0.73 check
 
+  build:
+    name: the package actually builds and installs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      # Nothing in CI built the distribution, so a metadata error that makes the
+      # wheel unbuildable shipped to main and was only found by trying to install
+      # it: the [tcp] extra is a direct reference (a git URL, since ssas-xmla-tcp
+      # is not on PyPI) and hatchling refuses those unless
+      # tool.hatch.metadata.allow-direct-references is set -- a refusal that fails
+      # the WHOLE build, not just that extra.
+      - name: build sdist and wheel
+        run: uv build
+      # --no-deps so this stays a packaging check: it must not drag in the
+      # OpenMetadata SDK, whose series is pinned to the ingestion image.
+      - name: install the built wheel and import the package
+        run: |
+          uv venv .pkgcheck
+          uv pip install --python .pkgcheck --no-deps dist/*.whl
+          .pkgcheck/bin/python -c "
+          import ssas_om
+          from ssas_om.source import SsasSource            # noqa: F401
+          from ssas_om.tcp_client import TcpXmlaClient     # noqa: F401
+          print('built and imported', ssas_om.__version__)
+          "
+      # The [tcp] extra must be DECLARED in the built metadata and its target must
+      # actually install. Both halves are needed: `pip install '.[tcp]' --no-deps`
+      # would report success while resolving nothing, and the extra points at a git
+      # URL, so a branch rename or an unmerged library breaks installation while
+      # every other job stays green -- which is exactly what happened.
+      - name: the [tcp] extra is declared in the built metadata
+        run: |
+          python - <<'EOF'
+          import glob, re, zipfile
+          whl = glob.glob("dist/*.whl")[0]
+          z = zipfile.ZipFile(whl)
+          meta = z.read(next(n for n in z.namelist() if n.endswith("METADATA"))).decode()
+          extras = re.findall(r"^Provides-Extra: (.+)$", meta, re.M)
+          assert "tcp" in extras, f"no tcp extra in built metadata; found {extras}"
+          dep = [l for l in meta.splitlines()
+                 if l.startswith("Requires-Dist:") and re.search(r"""extra == ['"]tcp['"]""", l)]
+          assert dep, "the tcp extra declares no requirement"
+          print("declared:", dep[0])
+          EOF
+      - name: the [tcp] extra's target actually installs
+        run: |
+          uv pip install --python .pkgcheck --no-deps --dry-run \
+            "ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@main"
+
   test-offline:
     name: offline unit tests (py ${{ matrix.python-version }})
     runs-on: ubuntu-latest
