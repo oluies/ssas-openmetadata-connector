@@ -21,6 +21,17 @@ leak=0
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   case "$f" in .githooks/pre-commit) continue;; esac
+  # Binary files are INVISIBLE to this gate: grep -I skips them, so every check
+  # below silently passes. A coverage database reached a public repo that way,
+  # carrying 22 absolute paths from the author's home directory. Refuse binaries
+  # outright rather than pretend to have scanned them.
+  if ! grep -qI . "$f" 2>/dev/null; then
+    echo "leak-gate: binary file cannot be scanned, refusing: $f" >&2
+    echo "  if it is genuinely safe, add it to .gitignore or scan it by hand" >&2
+    leak=1
+    continue
+  fi
+
   # non-IP token classes
   if grep -qEI "$nonip" "$f" 2>/dev/null; then
     echo "leak-gate: host/SID/connection-string token in: $f" >&2; leak=1
