@@ -16,8 +16,23 @@ allow_ip='^(127\.|0\.0\.0\.0$|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.|255\.255\
 # a reword silently produces a gate that scans nothing and exits 0 -- green while
 # checking zero files, which is worse than having no job at all.
 files_cmd="${LEAK_GATE_FILES_CMD:-git diff --cached --name-only --diff-filter=ACM}"
+# Whether an empty file list is an error depends on who asked. A caller that named
+# its own command (CI scanning every tracked file) meant to scan something, so zero
+# files is a broken invocation. The default staged-files command legitimately yields
+# nothing for a message-only `--amend` or a merge commit, and blocking those would
+# be a false refusal.
+explicit_files_cmd="${LEAK_GATE_FILES_CMD:+yes}"
+
+# Digest of a reviewed binary. Fails CLOSED: with no sha256 tool the placeholder
+# matches no allowlist entry, so every binary is refused rather than waved past.
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d" " -f1
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d" " -f1
+  else echo "NO-SHA256-TOOL"; fi
+}
 
 leak=0
+scanned=0
 while IFS= read -r f; do
   [ -f "$f" ] || continue
   case "$f" in .githooks/pre-commit) continue;; esac
@@ -26,19 +41,25 @@ while IFS= read -r f; do
   # carrying 22 absolute paths from the author's home directory. Refuse binaries
   # rather than pretend to have scanned them.
   #
-  # An EMPTY file is not binary, it is empty -- `grep -qI .` finds no matching
-  # line in one, so py.typed and __init__.py were briefly refused. Skip them:
-  # there is nothing in them to leak.
+  # The emptiness test matches the empty LINE (`grep -qI ''`), not any character
+  # (`grep -qI .`). A file of blank lines contains no matching character either,
+  # so the narrower test refused a whitespace-only .gitkeep as "binary" -- the
+  # same false refusal that hit py.typed, one byte away. `-I` still returns 1 for
+  # a genuine binary, which is what actually distinguishes the two.
   #
-  # Binaries that have been reviewed by eye are listed in .leakgate-allow, one
-  # path per line. Screenshots are the usual case, and they DO need review: a UI
-  # capture can show a hostname or address in a URL bar or a connection panel.
-  if [ -s "$f" ] && ! grep -qI . "$f" 2>/dev/null; then
-    if [ -f .leakgate-allow ] && grep -qxF "$f" .leakgate-allow 2>/dev/null; then
-      : # reviewed by hand and recorded
+  # Binaries reviewed by eye are recorded in .leakgate-allow AS A DIGEST AND PATH,
+  # not a path alone. A path-only entry grants that path permanent immunity: a
+  # re-captured screenshot now showing a hostname in the URL bar would pass
+  # unreviewed, which is precisely the case the review is for. Keying on content
+  # means replacing the file re-arms the gate.
+  if [ -s "$f" ] && ! grep -qI '' "$f" 2>/dev/null; then
+    digest=$(sha256_of "$f")
+    if [ -f .leakgate-allow ] && grep -qxF "$digest  $f" .leakgate-allow 2>/dev/null; then
+      : # this exact content was reviewed by hand and recorded
     else
       echo "leak-gate: binary file cannot be scanned, refusing: $f" >&2
-      echo "  review it by eye, then add its path to .leakgate-allow" >&2
+      echo "  review it by eye, then add this exact line to .leakgate-allow:" >&2
+      echo "    $digest  $f" >&2
       leak=1
     fi
     continue
@@ -51,26 +72,48 @@ while IFS= read -r f; do
   # any IPv4 that is NOT in the allowlist. Each token carries its image-reference
   # prefix when it has one, so a version tag can be told apart from an address.
   while IFS= read -r ip; do
-    # `registry/name:2.0.1.0` is an image tag, not a host. But "has a slash before
-    # the colon" is ALSO the shape of a file path with a line number or a pasted
-    # grep hit, so `src/main.py:10.20.30.40` was being exempted -- a hole, not a
-    # false positive. A prefix ending in a source/text extension is a path, and
-    # keeps being scanned.
+    # `registry/name:2.0.1.0` is an image tag, not a host. The exemption is a
+    # WHITELIST of what an image reference looks like, not a blacklist of file
+    # extensions: the blacklist version exempted anything it had not thought of --
+    # `docker/Dockerfile:10.1.2.3`, `SRC/MAIN.PY:...`, `.rst`, `.tf`, `.conf` --
+    # while the failure it exists to stop (`src/main.py:10.20.30.40`, a pasted grep
+    # hit carrying a real address) is exactly that shape. So: exempt only when the
+    # prefix is all lower-case image-name characters AND the segment before the
+    # colon has no dot, which is true of `openmetadata/ingestion` and of
+    # `docker.getcollate.io/openmetadata/ingestion`, and false of every file path
+    # with an extension and of every capitalised filename.
+    addr=${ip##*:}
     case "$ip" in
       */*:*)
         _prefix=${ip%%:*}
-        case "${_prefix##*/}" in
-          *.py|*.js|*.ts|*.go|*.rs|*.java|*.c|*.h|*.cc|*.cpp|*.sh|*.md|*.txt|\
-          *.yml|*.yaml|*.json|*.toml|*.xml|*.log|*.ini|*.cfg|*.sql|*.ps1) ;;
-          *) continue ;;
+        case "$_prefix" in
+          *[!a-z0-9._/-]*) ;;                   # uppercase etc: a path, keep scanning
+          *) case "${_prefix##*/}" in
+               *.*) ;;                          # last segment has an extension: a path
+               *) continue ;;                   # an image reference: exempt
+             esac ;;
         esac
         ;;
     esac
-    if ! printf '%s' "$ip" | grep -qE "$allow_ip"; then
+    # Test the ADDRESS, not the whole token: allow_ip is ^-anchored, so a loopback
+    # or RFC-5737 address inside a grep-hit-shaped string ("docs/setup.md:127.0.0.1")
+    # failed the anchor and was reported as a real address, with no way to express it.
+    if ! printf '%s' "$addr" | grep -qE "$allow_ip"; then
       echo "leak-gate: non-reserved IP '$ip' in: $f" >&2; leak=1
     fi
   done < <(grep -oEI '\b([A-Za-z0-9._-]+/[A-Za-z0-9._/-]*:)?[0-9]{1,3}(\.[0-9]{1,3}){3}\b' "$f" 2>/dev/null | sort -u)
+  scanned=$((scanned + 1))
 done < <(eval "$files_cmd")
+
+# A gate that scanned nothing and exited 0 is worse than no gate: it is green while
+# checking zero files. Indirecting the file list through $LEAK_GATE_FILES_CMD removed
+# the sed-rewrite version of that failure and moved it into the variable -- a stale or
+# mistyped command, or the wrong working directory, produces an empty list in silence.
+if [ -n "$explicit_files_cmd" ] && [ "$scanned" -eq 0 ]; then
+  echo "leak-gate: scanned 0 files -- the file list is empty, which is not a pass." >&2
+  echo "  LEAK_GATE_FILES_CMD was: $files_cmd" >&2
+  exit 1
+fi
 
 if [ "$leak" != 0 ]; then
   echo "COMMIT BLOCKED: remove real host/IP/SID/connection-string tokens (constitution I)." >&2

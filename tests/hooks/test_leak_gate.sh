@@ -23,13 +23,33 @@ SID="S-1-$(printf '%s-%s-%s-%s-%s' 5 21 1 2 500)"
 NETBIOS="WIN-$(printf '%s' AB12CD34)"
 
 fail=0
+verdict() {  # 1=name 2=want -- stages whatever is in the tree and runs the gate
+  git add -A >/dev/null 2>&1
+  if "$HOOK" >/dev/null 2>&1; then got=PASS; else got=BLOCK; fi
+  if [ "$got" = "$2" ]; then printf '  ok   %-40s %s\n' "$1" "$got"
+  else printf '  FAIL %-40s got=%s want=%s\n' "$1" "$got" "$2"; fail=1; fi
+  git rm -q --cached -r . >/dev/null 2>&1 || true
+  rm -f case.txt case.bin .leakgate-allow
+}
+
 check() {
   printf '%s\n' "$2" > case.txt
-  git add case.txt >/dev/null 2>&1
-  if "$HOOK" >/dev/null 2>&1; then got=PASS; else got=BLOCK; fi
-  if [ "$got" = "$3" ]; then printf '  ok   %-40s %s\n' "$1" "$got"
-  else printf '  FAIL %-40s got=%s want=%s\n' "$1" "$got" "$3"; fail=1; fi
-  git rm -q --cached case.txt >/dev/null 2>&1 || true
+  verdict "$1" "$3"
+}
+
+# Like check(), but the case file is written by a command rather than given as a
+# string, so a zero-byte, whitespace-only or NUL-carrying file can be pinned too.
+# $4, when given, is written to .leakgate-allow first.
+check_file() {
+  eval "$2"
+  [ -n "${4:-}" ] && printf '%s\n' "$4" > .leakgate-allow
+  verdict "$1" "$3"
+}
+
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d" " -f1
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d" " -f1
+  else echo "NO-SHA256-TOOL"; fi
 }
 
 check "image tag, full registry"     "FROM docker.example.io/openmetadata/ingestion:$TAG" PASS
@@ -46,5 +66,31 @@ check "addr inside a url"            "http://$REAL4/olap-tab/msmdpump.dll"      
 check "security identifier"          "owner $SID denied"                                   BLOCK
 check "netbios machine name"         "machine $NETBIOS responded"                          BLOCK
 check "image tag beside a real addr" "FROM openmetadata/ingestion:$TAG on $REAL3"          BLOCK
+check "loopback in a grep hit"       "docs/setup.md:$LOOPBACK"                             PASS
+check "doc range in a grep hit"      "compose.yml:$DOC"                                    PASS
+check "capitalised filename prefix"  "docker/Dockerfile:$REAL"                             BLOCK
+check "extensionless script prefix"  "ci/Makefile:$REAL2"                                  BLOCK
+check "uppercase path prefix"        "SRC/MAIN.PY:$REAL3"                                  BLOCK
+check "unlisted extension prefix"    "docs/guide.rst:$REAL4"                               BLOCK
+check "terraform prefix"             "infra/main.tf:$REAL5"                                BLOCK
+
+# The binary branch. grep -I skips binaries, so without these the gate reports
+# CLEAN on files it never read -- how a coverage database carrying home-directory
+# paths reached a public repo. All three of its outcomes are pinned here, plus the
+# two false refusals that the "is this binary?" test has produced in practice.
+check_file "empty file is not binary"     ': > case.txt'            PASS
+check_file "blank lines are not binary"   'printf "\n\n\n" > case.txt' PASS
+check_file "NUL byte is refused"          'printf "a\000b" > case.bin' BLOCK
+
+# An allowlist entry is a statement about CONTENT, so it must carry the digest.
+printf 'a\000b' > case.bin; GOOD=$(sha256_of case.bin); rm -f case.bin
+check_file "allowlisted by digest passes" 'printf "a\000b" > case.bin' PASS \
+           "$GOOD  case.bin"
+check_file "path alone does NOT allowlist" 'printf "a\000b" > case.bin' BLOCK \
+           "case.bin"
+# The regression the digest exists to stop: a re-captured screenshot replacing an
+# already-reviewed one must be refused until someone looks at the new content.
+check_file "stale digest re-arms the gate" 'printf "a\000c" > case.bin' BLOCK \
+           "$GOOD  case.bin"
 
 exit "$fail"

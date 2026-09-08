@@ -4,13 +4,24 @@
 # otherwise report CLEAN on a file it never read -- which is exactly how a
 # coverage database carrying absolute home-directory paths reached a public repo.
 #
-# Adding a path here is a statement that a human looked at the file. For a UI
+# FORMAT: one entry per line, `<sha256>  <path>` -- two spaces, and the path
+# exactly as `git ls-files` prints it (no `./` prefix, no trailing whitespace).
+# The comparison is a byte-exact whole-line match, so anything else is silently
+# not an entry. The gate prints the exact line to paste when it refuses a file.
+#
+# The digest is the point, not decoration. A path-only entry would grant that
+# path permanent immunity, so replacing `screenshot.png` with a re-capture that
+# now shows a hostname in the URL bar would pass unreviewed. Keying on content
+# means any replacement re-arms the gate and has to be reviewed again.
+#
+# Adding a line here is a statement that a human looked at THIS content. For a UI
 # screenshot that means checking for a hostname or address in a URL bar, a
 # connection panel, a tooltip or a breadcrumb.
 #
+
 # Reviewed 2026-09-08: all three show only service and catalog names
 # (ssas_md, ssas_tabular, AWMultidim, AWTabular, AWCube) and public
 # AdventureWorks sample data. No hostname, address, URL bar or credential.
-docs/images/openmetadata-explore-tree.png
-docs/images/openmetadata-sample-data.png
-docs/images/openmetadata-table-columns.png
+4734545e3f1fb5d7384cb2f5b64596041a549526c0009040cfcd5991df2cdbe0  docs/images/openmetadata-explore-tree.png
+df881cbb8c84df8b7e7429e12f72bf559e28cf3b5852f5046435a26243c822a1  docs/images/openmetadata-sample-data.png
+9484746a91bb593af16648374a5146fcf1bbc5ad07c187878200f38e5d89ca34  docs/images/openmetadata-table-columns.png
