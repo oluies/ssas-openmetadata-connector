@@ -45,12 +45,26 @@ jobs:
         run: |
           uv venv .pkgcheck
           uv pip install --python .pkgcheck --no-deps dist/*.whl
-          .pkgcheck/bin/python -c "
+          .pkgcheck/bin/python - <<'EOF'
+          import importlib, importlib.resources
+          # Every module EXCEPT source.py imports without the OpenMetadata SDK,
+          # which --no-deps deliberately withholds so this stays a packaging check
+          # and cannot drag in an SDK whose series is pinned to the runtime image.
+          for m in ("ssas_om", "ssas_om.client", "ssas_om.tcp_client",
+                    "ssas_om.classify", "ssas_om.csdl", "ssas_om.mdschema",
+                    "ssas_om.plan", "ssas_om.redact", "ssas_om.mapper_tabular",
+                    "ssas_om.mapper_cube"):
+              importlib.import_module(m)
+          # source.py is the SDK boundary, so it can only be checked for PRESENCE
+          # here -- the SDK image job is what imports it. A wheel that silently
+          # omitted a module would otherwise pass every other job.
+          shipped = {p.name for p in importlib.resources.files("ssas_om").iterdir()
+                     if p.suffix == ".py"}
+          missing = {"source.py", "tcp_client.py", "client.py"} - shipped
+          assert not missing, f"the wheel is missing {missing}"
           import ssas_om
-          from ssas_om.source import SsasSource            # noqa: F401
-          from ssas_om.tcp_client import TcpXmlaClient     # noqa: F401
-          print('built and imported', ssas_om.__version__)
-          "
+          print("built and imported", ssas_om.__version__, "|", len(shipped), "modules shipped")
+          EOF
       # The [tcp] extra must be DECLARED in the built metadata and its target must
       # actually install. Both halves are needed: `pip install '.[tcp]' --no-deps`
       # would report success while resolving nothing, and the extra points at a git
