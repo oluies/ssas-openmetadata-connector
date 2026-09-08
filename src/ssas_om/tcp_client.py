@@ -82,7 +82,7 @@ class TcpXmlaClient:
         mech = resolve_mechanism(auth_mechanism, password)
 
         try:
-            from ssas_xmla import Credential, connect
+            from ssas_xmla import Credential, connect  # ty: ignore[unresolved-import]
         except ImportError as exc:
             raise RuntimeError(
                 "transport='tcp' needs the extra: pip install '...[tcp]'"
@@ -132,7 +132,7 @@ class TcpXmlaClient:
         HTTP binding would have returned for the same condition, so the callers'
         existing checks keep their meaning.
         """
-        from ssas_xmla import (
+        from ssas_xmla import (  # ty: ignore[unresolved-import]
             AuthenticationError,
             AuthorizationError,
             ConnectionError,
