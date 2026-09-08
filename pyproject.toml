@@ -23,6 +23,11 @@ dependencies = [
 # SQL Server engine ingestion (T014) uses pymssql — pure-Python, no system ODBC driver.
 mssql = ["pymssql>=2.2"]
 kerberos = ["requests-kerberos>=0.14"]
+# Native XMLA/TCP, so no IIS/msmdpump is needed in front of the instance.
+# A separate package on purpose: it is a general protocol implementation whose
+# only dependency is pyspnego, and pulling the OpenMetadata SDK into it would
+# make it unusable for anyone outside this project.
+tcp = ["ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@main"]
 ntlm = ["requests-ntlm>=1.2"]
 dev = [
   "pytest>=8",

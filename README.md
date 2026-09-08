@@ -213,6 +213,9 @@ into a `0600`, auto-deleted runtime file.
 | `includeSampleData` | no | sample a few rows per tabular table (default `true`; set `false` to disable) |
 | `sampleDataRowCount` | no | max rows to sample per table (default `50`) |
 | `lineageService` / `lineageDatabase` / `lineageSchema` | no | link tables to a SQL source (schema default `dbo`) |
+| `transport` | no | `http` (default, via `msmdpump`) or `tcp` (native binding, no IIS) |
+| `port` | for `tcp` | the instance's **pinned** TCP port; required when `transport: tcp` |
+| `servicePrincipalClass` | no | SPN service class for Kerberos, default `MSOLAPSvc.3` |
 
 ### Configuring from the OpenMetadata UI
 
@@ -322,6 +325,42 @@ Invoke-WebRequest -Uri http://HOST/olap-tab/msmdpump.dll -Method Post -Body $bod
 instance, or the port pinned in `msmdsrv.ini` for a named one). If that works and the pump URL
 does not, Analysis Services is healthy and the fault is in IIS — which splits the problem in
 half before you touch OpenMetadata again.
+
+### Reading over the native TCP binding (no IIS)
+
+`transport: tcp` reads Analysis Services directly, with no `msmdpump` and no IIS in front of
+the instance. It needs the `[tcp]` extra:
+
+```bash
+pip install "ssas-om-connector[tcp] @ git+https://github.com/oluies/ssas-openmetadata-connector@main"
+```
+
+```yaml
+connectionOptions:
+  transport: "tcp"
+  host: "ssas-host.domain.com"
+  port: "2383"                 # the instance's PINNED port
+  authMechanism: "kerberos"
+```
+
+Two requirements, both about addressing:
+
+- **The port must be pinned** in the instance's `msmdsrv.ini`. A named instance uses a dynamic
+  port by default, and the redirector on TCP 2382 has no public specification, so it is not
+  used. A firewall rule is needed either way, which is why pinning costs nothing.
+- **`endpoint` is not used** on this transport — there is no IIS application to address.
+
+**Kerberos on this binding.** A domain-joined production instance should use
+`authMechanism: kerberos` with no `user` or `password`: the client authenticates from the
+ambient ticket cache or keytab, exactly as over HTTP. The SPN defaults to
+`MSOLAPSvc.3/<host>`, overridable with `servicePrincipalClass`.
+
+The wire format is mechanism-agnostic. The security token's length is written and read as a
+field rather than assumed, so Kerberos' larger token needs no code change — the reference
+client derives the same sizes from `QueryContextSizes` rather than hardcoding them.
+**However, Kerberos on the TCP binding is untested here**: the test instance is standalone,
+with no domain to authenticate against. NTLM is verified end to end; treat Kerberos as
+expected-to-work rather than proven, and the first production run as the test.
 
 ### Security models
 
