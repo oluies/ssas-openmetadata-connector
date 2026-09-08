@@ -205,14 +205,49 @@ into a `0600`, auto-deleted runtime file.
 
 | option | required | meaning |
 |---|---|---|
-| `host` | yes | e.g. `http://ssas-host` |
-| `endpoint` | yes | `/olap-tab/msmdpump.dll` or `/olap-md/msmdpump.dll` |
-| `user`, `password` | usually | reader credentials; **not required** when `authMechanism` is `kerberos` or `negotiate`, which authenticate from the ambient ticket cache |
+| `host` | yes | `http://ssas-host` for `transport: http`; a bare hostname is accepted for `transport: tcp`, where the scheme and path are stripped |
+| `endpoint` | for `http` | `/olap-tab/msmdpump.dll` or `/olap-md/msmdpump.dll` |
+| `transport` | no | `http` (default, via `msmdpump`) or `tcp` (native binding, no IIS) |
+| `port` | for `tcp` | the instance's **pinned** TCP port; required when `transport: tcp`, with no default |
+| `authMechanism` | no | `basic`, `kerberos`, `negotiate`, `ntlm` — see the table below; the **default follows the transport** (`basic` for `http`, `kerberos` for `tcp`) |
+| `user`, `password` | for `basic` / `ntlm` | reader credentials; **not required** when `authMechanism` is `kerberos` or `negotiate`, which authenticate from the ambient ticket cache |
+| `servicePrincipalClass` | no | SPN service class for Kerberos, default `MSOLAPSvc.3` |
 | `catalog` | no | restrict to one catalog; otherwise all are discovered |
-| `authMechanism` | no | `basic` (default), `kerberos`, `negotiate`, `ntlm` |
 | `includeSampleData` | no | sample a few rows per tabular table (default `true`; set `false` to disable) |
 | `sampleDataRowCount` | no | max rows to sample per table (default `50`) |
 | `lineageService` / `lineageDatabase` / `lineageSchema` | no | link tables to a SQL source (schema default `dbo`) |
+
+### Choosing `authMechanism`
+
+The two bindings do not offer the same mechanisms, which is the one place they are not
+interchangeable. HTTP Basic is a property of the IIS front end msmdpump runs behind; the
+native binding authenticates with GSS-API and has nothing to fall back to. So the connector
+**defaults the mechanism to the transport** rather than to a single global value, and
+`transport: tcp` with `authMechanism: basic` is rejected at construction instead of being
+quietly turned into a ticket login as some other identity.
+
+| `authMechanism` | `transport: http` | `transport: tcp` | credential it uses |
+|---|---|---|---|
+| `basic` | ✅ default | ❌ rejected | `user` + `password`, sent to IIS |
+| `ntlm` | ✅ | ✅ | `user` + `password` — both required |
+| `kerberos` | ✅ | ✅ default | the ambient ticket cache; `user`/`password` ignored |
+| `negotiate` | ✅ | ✅ | the ambient ticket cache; `user`/`password` ignored |
+
+**A domain service account is the common production case, and it maps to `ntlm` or
+`kerberos` depending on what the ingestion container has, not on what the account is:**
+
+- If the container has a Kerberos ticket (a keytab and a `kinit`, or a mounted `KRB5CCNAME`),
+  use `kerberos` and leave `password` out entirely. This is the better answer — no password
+  is stored in `connectionOptions`, which is not a secret field (see below).
+- If it does not, use `ntlm` with the domain account's `user` and `password`. NTLM derives
+  its key from the password and cannot read a ticket cache, so `ntlm` without a `password`
+  is rejected rather than silently attempted.
+- `negotiate` lets the mechanism be chosen at handshake time. It needs the same ticket
+  cache as `kerberos`, so it is not a way to avoid one.
+
+Kerberos additionally needs the server's SPN to resolve. `servicePrincipalClass` sets the
+service class in the SPN the client asks for (`MSOLAPSvc.3/host`); change it only if your
+instance is registered under a different class.
 
 ### Configuring from the OpenMetadata UI
 
@@ -322,6 +357,42 @@ Invoke-WebRequest -Uri http://HOST/olap-tab/msmdpump.dll -Method Post -Body $bod
 instance, or the port pinned in `msmdsrv.ini` for a named one). If that works and the pump URL
 does not, Analysis Services is healthy and the fault is in IIS — which splits the problem in
 half before you touch OpenMetadata again.
+
+### Reading over the native TCP binding (no IIS)
+
+`transport: tcp` reads Analysis Services directly, with no `msmdpump` and no IIS in front of
+the instance. It needs the `[tcp]` extra:
+
+```bash
+pip install "ssas-om-connector[tcp] @ git+https://github.com/oluies/ssas-openmetadata-connector@main"
+```
+
+```yaml
+connectionOptions:
+  transport: "tcp"
+  host: "ssas-host.domain.com"
+  port: "2383"                 # the instance's PINNED port
+  authMechanism: "kerberos"
+```
+
+Two requirements, both about addressing:
+
+- **The port must be pinned** in the instance's `msmdsrv.ini`. A named instance uses a dynamic
+  port by default, and the redirector on TCP 2382 has no public specification, so it is not
+  used. A firewall rule is needed either way, which is why pinning costs nothing.
+- **`endpoint` is not used** on this transport — there is no IIS application to address.
+
+**Kerberos on this binding.** A domain-joined production instance should use
+`authMechanism: kerberos` with no `user` or `password`: the client authenticates from the
+ambient ticket cache or keytab, exactly as over HTTP. The SPN defaults to
+`MSOLAPSvc.3/<host>`, overridable with `servicePrincipalClass`.
+
+The wire format is mechanism-agnostic. The security token's length is written and read as a
+field rather than assumed, so Kerberos' larger token needs no code change — the reference
+client derives the same sizes from `QueryContextSizes` rather than hardcoding them.
+**However, Kerberos on the TCP binding is untested here**: the test instance is standalone,
+with no domain to authenticate against. NTLM is verified end to end; treat Kerberos as
+expected-to-work rather than proven, and the first production run as the test.
 
 ### Security models
 

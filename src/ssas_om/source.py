@@ -87,6 +87,18 @@ _XNAME = re.compile(r"_x([0-9A-Fa-f]{4})_")
 _DAX_COL = re.compile(r"^.*\[(?P<col>.*)\]$")
 
 
+# Each binding offers its own set of mechanisms, so the default follows the
+# transport: msmdpump sits behind IIS and answers HTTP Basic, while the native
+# binding authenticates with GSS-API only and has no Basic to fall back to.
+_DEFAULT_MECHANISM = {"http": "basic", "tcp": "kerberos"}
+
+
+def _bare_host(host: str) -> str:
+    """Strip a URL scheme and path: the TCP binding takes a hostname, not a URL."""
+    bare = re.sub(r"^\w+://", "", host).strip("/")
+    return bare.split("/", 1)[0].split(":", 1)[0]
+
+
 def _dax_column_name(key: str) -> str:
     decoded = _XNAME.sub(lambda m: chr(int(m.group(1), 16)), key)
     m = _DAX_COL.match(decoded)
@@ -102,7 +114,9 @@ class SsasSource(Source):
             config.serviceConnection.root.config.connectionOptions.root
         )
         self.host = str(opts["host"]).rstrip("/")
-        self.endpoint = str(opts["endpoint"])
+        # `endpoint` is the msmdpump path inside IIS and has no meaning on the
+        # native binding, so it is demanded per transport rather than always.
+        self.endpoint = str(opts.get("endpoint", ""))
         self.catalog_opt = opts.get("catalog")
         # optional table-level lineage target (the SQL source ingested separately)
         self.lineage_service = opts.get("lineageService")
@@ -112,7 +126,14 @@ class SsasSource(Source):
         self.include_sample_data = _as_bool(opts.get("includeSampleData"), True)
         self.sample_data_row_count = _as_int(opts.get("sampleDataRowCount"), 50)
         self.service_name = config.serviceName
-        mech = str(opts.get("authMechanism", "basic")).lower()
+        transport = str(opts.get("transport", "http")).lower()
+        # The default mechanism follows the transport, because the two bindings do
+        # not offer the same set: HTTP Basic is msmdpump's IIS front end, and the
+        # native binding speaks GSS-API only. Defaulting tcp to 'basic' would make
+        # the common case fail on a setting the operator never wrote.
+        mech = str(
+            opts.get("authMechanism") or _DEFAULT_MECHANISM.get(transport, "basic")
+        ).lower()
         # kerberos/negotiate authenticate from the ambient ticket cache -- see
         # _requests_auth, which ignores user/password for those mechanisms. Demanding
         # them anyway forced a dummy credential into the service config, where it sat
@@ -130,12 +151,45 @@ class SsasSource(Source):
                 )
             user = str(opts["user"])
             password = str(opts["password"])
-        self.client = XmlaClient(
-            url=self.host + self.endpoint,
-            user=user,
-            password=password,
-            auth_mechanism=mech,
-        )
+        if transport == "tcp":
+            # Native XMLA/TCP: no IIS in front of the instance. The port must be
+            # PINNED in msmdsrv.ini -- the named-instance redirector on 2382 has
+            # no public specification and is not used.
+            from .tcp_client import TcpXmlaClient
+
+            port = opts.get("port")
+            if not port:
+                raise KeyError(
+                    "transport='tcp' requires 'port' in connectionOptions: the "
+                    "instance's pinned TCP port. There is no default, because "
+                    "guessing between a default instance's well-known port and a "
+                    "named instance's pinned one presents as a hang."
+                )
+            self.client = TcpXmlaClient(
+                host=_bare_host(self.host),
+                port=int(port),
+                user=user,
+                password=password,
+                auth_mechanism=mech,
+                service=str(opts.get("servicePrincipalClass", "MSOLAPSvc.3")),
+            )
+        elif transport == "http":
+            if not self.endpoint:
+                raise KeyError(
+                    "connectionOptions is missing 'endpoint', which transport="
+                    "'http' requires: the msmdpump path, e.g. "
+                    "'/olap-tab/msmdpump.dll'."
+                )
+            self.client = XmlaClient(
+                url=self.host + self.endpoint,
+                user=user,
+                password=password,
+                auth_mechanism=mech,
+            )
+        else:
+            raise ValueError(
+                f"unknown transport {transport!r}; expected 'http' or 'tcp'"
+            )
 
     @classmethod
     def create(

@@ -104,21 +104,46 @@ a `test_connection` probe uses `DISCOVER_DATASOURCES` and fails loudly on a 401/
 
 ## Authentication
 
-The SSAS endpoint is IIS `msmdpump`, which can front several IIS auth schemes. The client
-selects one per `authMechanism`:
+The mechanism is chosen per `authMechanism`, but **the set on offer depends on the
+transport** — this is the one place the two bindings are not interchangeable. HTTP Basic is a
+property of the IIS front end `msmdpump` runs behind; the native binding authenticates with
+GSS-API and has nothing to fall back to.
 
 ```mermaid
 flowchart TD
-    opt["authMechanism"] --> basic["basic (default)\nHTTP Basic\nno extra deps"]
-    opt --> krb["kerberos / negotiate\nrequests-kerberos\nneeds ticket cache / SSPI"]
-    opt --> ntlm["ntlm\nrequests-ntlm"]
+    opt["authMechanism"] --> http["transport: http\nIIS msmdpump"]
+    opt --> tcp["transport: tcp\nnative binding"]
+    http --> basic["basic (default here)\nHTTP Basic\nno extra deps"]
+    http --> hkrb["kerberos / negotiate\nrequests-kerberos"]
+    http --> hntlm["ntlm\nrequests-ntlm"]
+    tcp --> reject["basic\nREJECTED"]
+    tcp --> tkrb["kerberos (default here) / negotiate\npyspnego, ticket cache"]
+    tcp --> tntlm["ntlm\npyspnego, needs password"]
     basic --> sess["requests.Session.auth"]
-    krb --> sess
-    ntlm --> sess
+    hkrb --> sess
+    hntlm --> sess
+    tkrb --> gss["ssas_xmla Credential\nAuthenticate/AuthenticateResponse loop"]
+    tntlm --> gss
 ```
 
-Kerberos/NTLM ship as optional extras (`[kerberos]`, `[ntlm]`); requesting one without the
-extra installed raises a clear install message.
+Two consequences of that split, both deliberate:
+
+- **The default follows the transport** (`_DEFAULT_MECHANISM` in `source.py`): `basic` for
+  `http`, `kerberos` for `tcp`. A single global default would make one of the two transports
+  fail on a setting the operator never wrote.
+- **`basic` on `tcp` is rejected, not coerced.** An earlier version mapped it onto
+  `kerberos`, which discarded the supplied password and authenticated as whoever held a
+  ticket. A silently *different identity* is worse than a refusal, so `resolve_mechanism`
+  refuses and names the alternatives. `ntlm` without a password is refused for the same
+  reason: NTLM derives its key from the password and cannot read a ticket cache.
+
+`endpoint` follows the same rule — it is the `msmdpump` path inside IIS, so it is demanded
+for `http` and ignored for `tcp`, where `port` (the instance's pinned TCP port) is required
+instead.
+
+Kerberos/NTLM over HTTP ship as optional extras (`[kerberos]`, `[ntlm]`), and the native
+binding as `[tcp]`; requesting one without the extra installed raises a clear install
+message.
 
 **`kerberos` and `negotiate` need no `user`/`password`.** They authenticate from the ambient
 ticket cache, and `_requests_auth` ignores both. The Source therefore does not demand them for
