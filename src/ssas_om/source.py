@@ -10,6 +10,7 @@ request is ever issued.
 """
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -93,6 +94,41 @@ _DAX_COL = re.compile(r"^.*\[(?P<col>.*)\]$")
 _DEFAULT_MECHANISM = {"http": "basic", "tcp": "kerberos"}
 
 
+def _password_from(opts: dict[str, Any]) -> str:
+    """The password, from `connectionOptions` or from the environment.
+
+    `passwordEnvVar` names an environment variable; the value never enters
+    OpenMetadata. That matters because `connectionOptions` is typed
+    `dict[str, str]` in the OpenMetadata schema with no password format, so a
+    literal `password` is stored unencrypted and returned by the API to anyone who
+    may view the service — see "How the password is stored" in the README. A
+    variable NAME is not a credential, so it is safe to hold there.
+
+    Both set is an error rather than a precedence rule. Silently preferring one
+    would mean an operator who edited the wrong one would see no change and no
+    message, and would be authenticating with a credential they thought they had
+    replaced.
+    """
+    literal = opts.get("password")
+    env_name = opts.get("passwordEnvVar")
+    if literal and env_name:
+        raise KeyError(
+            "connectionOptions sets both 'password' and 'passwordEnvVar'; use one. "
+            "'passwordEnvVar' keeps the credential out of OpenMetadata entirely."
+        )
+    if not env_name:
+        return str(literal or "")
+    value = os.environ.get(str(env_name))
+    if not value:
+        raise KeyError(
+            f"connectionOptions sets passwordEnvVar={str(env_name)!r}, but that "
+            f"environment variable is unset or empty in the ingestion runtime. "
+            f"The value is supplied by the runtime (a Kubernetes Secret, the "
+            f"compose env, or run-ingestion.sh), not by OpenMetadata."
+        )
+    return value
+
+
 def _bare_host(host: str) -> str:
     """Strip a URL scheme and path: the TCP binding takes a hostname, not a URL."""
     bare = re.sub(r"^\w+://", "", host).strip("/")
@@ -140,17 +176,21 @@ class SsasSource(Source):
         # in clear text doing nothing. basic/ntlm still require both.
         if mech in ("kerberos", "negotiate"):
             user = str(opts.get("user", ""))
-            password = str(opts.get("password", ""))
+            password = _password_from(opts)
         else:
-            missing = [k for k in ("user", "password") if not opts.get(k)]
+            password = _password_from(opts)
+            missing = [k for k in ("user",) if not opts.get(k)]
+            if not password:
+                missing.append("password")
             if missing:
                 raise KeyError(
                     f"connectionOptions is missing {' and '.join(missing)}, which "
                     f"authMechanism={mech!r} requires. Only kerberos and negotiate "
-                    f"authenticate without them, from the ambient ticket cache."
+                    f"authenticate without them, from the ambient ticket cache. "
+                    f"'password' may instead be supplied as 'passwordEnvVar', the "
+                    f"NAME of an environment variable holding it."
                 )
             user = str(opts["user"])
-            password = str(opts["password"])
         if transport == "tcp":
             # Native XMLA/TCP: no IIS in front of the instance. The port must be
             # PINNED in msmdsrv.ini -- the named-instance redirector on 2382 has

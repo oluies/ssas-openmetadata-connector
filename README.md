@@ -201,21 +201,239 @@ Credentials come only from a gitignored `.env` (never committed). The ingestion 
 under `config/` are committed with `${VAR}` placeholders; `run-ingestion.sh` substitutes them
 into a `0600`, auto-deleted runtime file.
 
-`connectionOptions` understood by the connector:
+## Configuration reference
 
-| option | required | meaning |
+Every value in `connectionOptions` is a **string** — the OpenMetadata schema types it as
+`dict[str, str]`, and the UI form has no other input type. Booleans and numbers are therefore
+quoted (`"true"`, `"50"`) and parsed permissively by the connector: `_as_bool` accepts
+`1/true/yes/on` in any case, and `_as_int` falls back to the default on anything unparseable.
+
+### Connection
+
+| option | type | required | default | meaning |
+|---|---|---|---|---|
+| `host` | string | **yes** | — | `http://ssas-host` for `transport: http`. For `transport: tcp` a bare hostname is enough; any scheme, port or path is stripped, so the same value works for both. |
+| `transport` | `http` \| `tcp` | no | `http` | `http` goes through IIS `msmdpump`; `tcp` speaks the native XMLA/TCP binding and needs no IIS. Anything else is rejected. |
+| `endpoint` | string | **for `http`** | — | The `msmdpump` path, e.g. `/olap-tab/msmdpump.dll`. Meaningless on `tcp` and ignored there. |
+| `port` | integer | **for `tcp`** | — | The instance's **pinned** TCP port. No default on purpose: guessing between a default instance's well-known port and a named instance's pinned one presents to the operator as a hang, not an error. |
+
+### Authentication
+
+| option | type | required | default | meaning |
+|---|---|---|---|---|
+| `authMechanism` | `basic` \| `ntlm` \| `kerberos` \| `negotiate` | no | **follows `transport`**: `basic` for `http`, `kerberos` for `tcp` | See [Choosing `authMechanism`](#choosing-authmechanism). `basic` on `tcp` is rejected, not coerced. |
+| `user` | string | **for `basic` / `ntlm`** | — | Reader account. Domain accounts take the `DOMAIN\user` form. |
+| `password` | string | **for `basic` / `ntlm`** | — | The credential itself. Stored unencrypted — see [How the password is stored](#how-the-password-is-stored). Prefer `passwordEnvVar`. |
+| `passwordEnvVar` | string | alternative to `password` | — | The **name** of an environment variable holding the password. The value never enters OpenMetadata. Setting both this and `password` is an error, not a precedence rule. |
+| `servicePrincipalClass` | string | no | `MSOLAPSvc.3` | The service class in the SPN requested for Kerberos. Change it only if the instance is registered under another class (SQL Browser uses `MSOLAPDisco.3`). |
+
+`user` and `password` are **not** required for `kerberos` or `negotiate`: those authenticate
+from the ambient ticket cache and ignore both. Supplying them anyway is harmless but pointless
+— and puts a credential in the config for nothing.
+
+### What gets ingested
+
+| option | type | required | default | meaning |
+|---|---|---|---|---|
+| `catalog` | string | no | *all* | Restrict ingestion to one catalog. Omit to discover every catalog the account can see. |
+| `includeSampleData` | boolean | no | `"true"` | Sample a few rows per tabular table for the UI's sample-data tab. Set `"false"` where reading rows is unwelcome — the connector then issues no `EVALUATE` at all. |
+| `sampleDataRowCount` | integer | no | `"50"` | Maximum rows sampled per table. Ignored when `includeSampleData` is false. |
+
+### Lineage to the SQL source
+
+All three are optional; set them to link ingested tables to a SQL Server source ingested
+separately by OpenMetadata's built-in connector. **`lineageService` and `lineageDatabase` are
+both required for any lineage to be emitted** — with either missing the connector emits none,
+silently, because a half-specified target would produce edges pointing nowhere.
+
+| option | type | required | default | meaning |
+|---|---|---|---|---|
+| `lineageService` | string | for lineage | — | The OpenMetadata **service name** of the SQL source. |
+| `lineageDatabase` | string | for lineage | — | Database name within that service. |
+| `lineageSchema` | string | no | `dbo` | Schema within that database. |
+
+
+### How the password is stored
+
+Worth knowing before putting a production credential in `connectionOptions`, because it is not
+what a built-in connector does.
+
+`connectionOptions` is typed `RootModel[dict[str, str]]` in the OpenMetadata schema
+(`connectionBasicType.ConnectionOptions`). A field the schema marks as a password generates as
+`CustomSecretStr`; this one generates as plain `str`. That annotation is what the masking and
+the secrets manager key off, so its absence has three consequences:
+
+- **Not masked.** The value is returned by the API and rendered in the UI as an ordinary
+  option, to anyone who can view the service.
+- **Not externalised.** With the **`db`** secrets-manager provider — the default, and what this
+  deployment uses — the ingestion-side implementation is a pass-through: `get_string_value`
+  returns what it was handed, fetching nothing from an external store. The value travels
+  inline with the service config.
+- **Not encrypted at rest by the provider.** OpenMetadata encrypts the fields the schema marks
+  as secrets; an unannotated option is not one of them.
+
+Nothing in the ingestion path treats `connectionOptions` as secret-bearing — the only code that
+touches it is `ssl_manager.py`, which *writes* certificate paths into it.
+
+**Verify it on your own instance** rather than taking this on trust; it is one request:
+
+```bash
+curl -s -H "Authorization: Bearer $OM_JWT_TOKEN" \
+  "$OM_HOST/api/v1/services/databaseServices/name/<service>?fields=connection" \
+  | jq '.connection.config.connectionOptions'
+```
+
+If the password comes back in clear, it is stored in clear.
+
+**What to do about it**, in order of preference:
+
+1. **Use `passwordEnvVar`** and let the runtime supply the value. `connectionOptions` then
+   holds only a variable *name*, which is not a credential, and the password lives wherever
+   your platform already keeps secrets:
+
+   ```yaml
+   connectionOptions:
+     user: "DOMAIN\\svc_om_reader"
+     passwordEnvVar: "SSAS_PASSWORD"      # the NAME, not the value
+   ```
+
+   How the variable reaches the ingestion pod depends on how ingestion is spawned, and the two
+   paths differ in an important way:
+
+   | path | mechanism | can it reference a Secret? |
+   |---|---|---|
+   | `omjob-operator` | `OMJob.spec.mainPodSpec.env[]` | **yes** — the CRD supports `valueFrom.secretKeyRef` |
+   | chart passthrough | `pipelineServiceClientConfig.k8s.extraEnvVars` | **no** — schema is `array<string>`, serialised to a Helm-managed Secret, so literals only |
+
+   Either way the credential leaves the OpenMetadata database and stops being readable through
+   the service API. The `extraEnvVars` route applies the variable to *every* ingestion pod,
+   which is worth weighing — though a pod that can read it already receives every other
+   service's credentials from OpenMetadata anyway.
+
+   [Where the password lives, end to end](#where-the-password-lives-end-to-end) traces each
+   hop and who can read it; [Where to configure it](#where-to-configure-it) names the file for
+   each deployment. Locally the same option works with `run-ingestion.sh`, `docker compose`,
+   or a plain `export`.
+
+2. **Use `kerberos`** and no password at all. The ticket comes from the runtime, not the
+   config. This is the only option that removes the credential rather than protecting it — see
+   [`docs/kerberos-in-kubernetes.md`](docs/kerberos-in-kubernetes.md) for what that takes in
+   Kubernetes, including two blockers worth knowing about first.
+3. **Give the account nothing worth stealing.** It needs only read on the SSAS databases; the
+   connector never issues an admin-gated (TMSCHEMA) request, so a per-database reader role is
+   sufficient. Scope it so disclosure is a nuisance, not an incident.
+4. **Restrict who can read the service** in OpenMetadata, since viewing it reveals the value.
+
+### Where the password lives, end to end
+
+With `passwordEnvVar`, the credential never enters OpenMetadata. It is worth being able to
+point at each hop, because when authentication fails the question is always *which* copy is
+stale.
+
+```
+  source of truth            delivery                      consumption
+  ---------------            --------                      -----------
+  Kubernetes Secret   -->  OMJob.spec.mainPodSpec.env[]  -->  $SSAS_PASSWORD
+  (or Helm value,          .valueFrom.secretKeyRef            in the ingestion pod
+   or local .env)          (or extraEnvVars, literals)         |
+                                                               v
+                                                   connectionOptions.passwordEnvVar
+                                                     names the variable; the
+                                                     connector reads os.environ
+                                                               |
+                                                               v
+                                                   OpenMetadata stores only
+                                                     the variable NAME
+```
+
+| hop | holds | who can read it |
 |---|---|---|
-| `host` | yes | `http://ssas-host` for `transport: http`; a bare hostname is accepted for `transport: tcp`, where the scheme and path are stripped |
-| `endpoint` | for `http` | `/olap-tab/msmdpump.dll` or `/olap-md/msmdpump.dll` |
-| `transport` | no | `http` (default, via `msmdpump`) or `tcp` (native binding, no IIS) |
-| `port` | for `tcp` | the instance's **pinned** TCP port; required when `transport: tcp`, with no default |
-| `authMechanism` | no | `basic`, `kerberos`, `negotiate`, `ntlm` — see the table below; the **default follows the transport** (`basic` for `http`, `kerberos` for `tcp`) |
-| `user`, `password` | for `basic` / `ntlm` | reader credentials; **not required** when `authMechanism` is `kerberos` or `negotiate`, which authenticate from the ambient ticket cache |
-| `servicePrincipalClass` | no | SPN service class for Kerberos, default `MSOLAPSvc.3` |
-| `catalog` | no | restrict to one catalog; otherwise all are discovered |
-| `includeSampleData` | no | sample a few rows per tabular table (default `true`; set `false` to disable) |
-| `sampleDataRowCount` | no | max rows to sample per table (default `50`) |
-| `lineageService` / `lineageDatabase` / `lineageSchema` | no | link tables to a SQL source (schema default `dbo`) |
+| Kubernetes Secret | the password | anyone with `get secret` in that namespace |
+| ingestion pod env | the password | anything running in that pod |
+| `connectionOptions` | the variable **name** | anyone who may view the service |
+| OpenMetadata database | the variable **name** | OpenMetadata operators, DB admins |
+
+Compare with a literal `password`, where the bottom two rows hold the credential itself.
+
+One property to keep in mind: an environment variable is visible to everything in the pod and
+to `kubectl exec`. This narrows exposure from "anyone who can view the service in the UI" to
+"anyone who can exec into the ingestion namespace" — a smaller and more auditable set, but not
+zero. Only `kerberos` removes the credential rather than relocating it.
+
+### Where to configure it
+
+Four places, depending on how you run the connector. In each case
+`connectionOptions.passwordEnvVar` names the variable; only the delivery differs.
+
+**Kubernetes, `omjob-operator`** (`useOMJobOperator: true`). Create the Secret alongside the
+others, then reference it:
+
+```bash
+kubectl -n "$NS" create secret generic ssas-reader \
+  --from-literal=SSAS_PASSWORD='...'
+```
+
+The `OMJob` the server generates takes the reference through
+`mainPodSpec.env[].valueFrom.secretKeyRef`, which the CRD supports
+(`charts/<ver>/openmetadata/templates/omjob-crd.yaml`).
+
+**Kubernetes, chart passthrough.** `openmetadata.config.pipelineServiceClientConfig.k8s.extraEnvVars`
+in `values-openmetadata.yaml` — the same block that already sets `ingestionImage` and
+`useOMJobOperator`. Note the constraint, which comes from the chart's own schema: the field is
+`array<string>`, serialised with `toJson | b64enc` into a Helm-managed Secret, so it carries
+**literal values only** and applies to **every** ingestion pod.
+
+**Local, `run-ingestion.sh`.** Put `SSAS_PASSWORD=...` in the gitignored `.env`; the script
+already exports it and substitutes `${VAR}` placeholders into a `0600` runtime file it deletes
+on exit.
+
+**Docker Compose.** Add it to the ingestion service's `environment:` in `docker/compose.yml`,
+or an `env_file:` pointing at `.env`.
+
+Whichever you use, the connector's failure message names the variable and says the runtime
+supplies it — so a missing value points at the delivery hop rather than at the service config,
+which is the one place it will not be.
+
+### Worked examples
+
+Native TCP with a domain account and no IIS — the shape verified end to end against a live
+instance:
+
+```yaml
+connectionOptions:
+  host: "ssas-host"
+  transport: "tcp"
+  port: "2383"
+  authMechanism: "ntlm"
+  user: "DOMAIN\\svc_om_reader"
+  passwordEnvVar: "SSAS_PASSWORD"   # the NAME; the runtime supplies the value
+  includeSampleData: "false"
+```
+
+Through `msmdpump` over HTTP, with lineage to a SQL Server service already in OpenMetadata:
+
+```yaml
+connectionOptions:
+  host: "http://ssas-host"
+  endpoint: "/olap-tab/msmdpump.dll"
+  authMechanism: "basic"
+  user: "${SSAS_USER}"
+  password: "${SSAS_PASSWORD}"
+  lineageService: "mssql_prod"
+  lineageDatabase: "AdventureWorksDW2022"
+  lineageSchema: "dbo"
+```
+
+Kerberos, where the runtime supplies the ticket and no credential appears in the config:
+
+```yaml
+connectionOptions:
+  host: "ssas-host"
+  transport: "tcp"
+  port: "2383"
+  authMechanism: "kerberos"
+  # no user, no password: both are ignored on this path
+```
 
 ### Choosing `authMechanism`
 
@@ -278,11 +496,8 @@ permissively (`_as_bool` / `_as_int` in `source.py`), so `true`, `True` and `yes
 
 Two things the YAML path still does better:
 
-- **The password is not a secret field.** `connectionOptions` is a plain string map in the
-  OpenMetadata schema with no password format, so the SSAS password is stored as an ordinary
-  option value — not with the masking and secret-manager handling a built-in connector's
-  password field gets. `run-ingestion.sh` at least confines it to a `0600` file it deletes on
-  exit.
+- **The password is not a secret field** — see [How the password is stored](#how-the-password-is-stored).
+  `run-ingestion.sh` at least confines it to a `0600` file it deletes on exit.
 - **`run-ingestion.sh` is invisible to the UI.** It bind-mounts `src/` into a throwaway
   `docker run`, whereas a UI-triggered pipeline runs in Airflow's own container. Editing the
   code changes nothing about a scheduled run until the derived image is rebuilt.
@@ -427,6 +642,13 @@ logged-in Windows identity (true Windows SSPI works only if the connector runs o
      # No user/password: kerberos and negotiate authenticate from the ambient
      # ticket cache. For ntlm, add user in DOMAIN\\user form plus password.
    ```
+
+Running this **in Kubernetes** is a separate problem from configuring it: the OpenMetadata
+`omjob-operator` shapes ingestion pods from `OMJob.spec.mainPodSpec`, which has no `volumes` or
+`initContainers` field, and the stock ingestion image cannot do Kerberos at all (it ships
+`kinit` and `libkrb5` but not python-`gssapi`). See
+[`docs/kerberos-in-kubernetes.md`](docs/kerberos-in-kubernetes.md) for what that rules out, the
+Kyverno route that works around it, and why `ntlm` is the sensible first step.
 
 Requesting `kerberos`/`ntlm` without the matching extra installed raises a clear error naming
 the missing extra. The connector never logs request bodies or the `Authorization` header.
