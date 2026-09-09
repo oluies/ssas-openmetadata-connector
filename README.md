@@ -310,8 +310,10 @@ If the password comes back in clear, it is stored in clear.
    which is worth weighing — though a pod that can read it already receives every other
    service's credentials from OpenMetadata anyway.
 
-   Locally the same option works with `run-ingestion.sh`, `docker compose`, or a plain
-   `export`.
+   [Where the password lives, end to end](#where-the-password-lives-end-to-end) traces each
+   hop and who can read it; [Where to configure it](#where-to-configure-it) names the file for
+   each deployment. Locally the same option works with `run-ingestion.sh`, `docker compose`,
+   or a plain `export`.
 
 2. **Use `kerberos`** and no password at all. The ticket comes from the runtime, not the
    config. This is the only option that removes the credential rather than protecting it — see
@@ -321,6 +323,76 @@ If the password comes back in clear, it is stored in clear.
    connector never issues an admin-gated (TMSCHEMA) request, so a per-database reader role is
    sufficient. Scope it so disclosure is a nuisance, not an incident.
 4. **Restrict who can read the service** in OpenMetadata, since viewing it reveals the value.
+
+### Where the password lives, end to end
+
+With `passwordEnvVar`, the credential never enters OpenMetadata. It is worth being able to
+point at each hop, because when authentication fails the question is always *which* copy is
+stale.
+
+```
+  source of truth            delivery                      consumption
+  ---------------            --------                      -----------
+  Kubernetes Secret   -->  OMJob.spec.mainPodSpec.env[]  -->  $SSAS_PASSWORD
+  (or Helm value,          .valueFrom.secretKeyRef            in the ingestion pod
+   or local .env)          (or extraEnvVars, literals)         |
+                                                               v
+                                                   connectionOptions.passwordEnvVar
+                                                     names the variable; the
+                                                     connector reads os.environ
+                                                               |
+                                                               v
+                                                   OpenMetadata stores only
+                                                     the variable NAME
+```
+
+| hop | holds | who can read it |
+|---|---|---|
+| Kubernetes Secret | the password | anyone with `get secret` in that namespace |
+| ingestion pod env | the password | anything running in that pod |
+| `connectionOptions` | the variable **name** | anyone who may view the service |
+| OpenMetadata database | the variable **name** | OpenMetadata operators, DB admins |
+
+Compare with a literal `password`, where the bottom two rows hold the credential itself.
+
+One property to keep in mind: an environment variable is visible to everything in the pod and
+to `kubectl exec`. This narrows exposure from "anyone who can view the service in the UI" to
+"anyone who can exec into the ingestion namespace" — a smaller and more auditable set, but not
+zero. Only `kerberos` removes the credential rather than relocating it.
+
+### Where to configure it
+
+Four places, depending on how you run the connector. In each case
+`connectionOptions.passwordEnvVar` names the variable; only the delivery differs.
+
+**Kubernetes, `omjob-operator`** (`useOMJobOperator: true`). Create the Secret alongside the
+others, then reference it:
+
+```bash
+kubectl -n "$NS" create secret generic ssas-reader \
+  --from-literal=SSAS_PASSWORD='...'
+```
+
+The `OMJob` the server generates takes the reference through
+`mainPodSpec.env[].valueFrom.secretKeyRef`, which the CRD supports
+(`charts/<ver>/openmetadata/templates/omjob-crd.yaml`).
+
+**Kubernetes, chart passthrough.** `openmetadata.config.pipelineServiceClientConfig.k8s.extraEnvVars`
+in `values-openmetadata.yaml` — the same block that already sets `ingestionImage` and
+`useOMJobOperator`. Note the constraint, which comes from the chart's own schema: the field is
+`array<string>`, serialised with `toJson | b64enc` into a Helm-managed Secret, so it carries
+**literal values only** and applies to **every** ingestion pod.
+
+**Local, `run-ingestion.sh`.** Put `SSAS_PASSWORD=...` in the gitignored `.env`; the script
+already exports it and substitutes `${VAR}` placeholders into a `0600` runtime file it deletes
+on exit.
+
+**Docker Compose.** Add it to the ingestion service's `environment:` in `docker/compose.yml`,
+or an `env_file:` pointing at `.env`.
+
+Whichever you use, the connector's failure message names the variable and says the runtime
+supplies it — so a missing value points at the delivery hop rather than at the service config,
+which is the one place it will not be.
 
 ### Worked examples
 
