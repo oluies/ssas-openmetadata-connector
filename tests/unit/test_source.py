@@ -349,3 +349,69 @@ def test_http_still_demands_an_endpoint_and_says_which_option():
             _config({"host": "http://ssas.internal", "user": "r", "password": "p"}),
             MagicMock(),
         )
+
+
+# --- the password can come from the environment instead of the config ----------
+# connectionOptions is dict[str, str] in the OpenMetadata schema with no password
+# format, so a literal password is stored unencrypted and returned by the API to
+# anyone who may view the service. A variable NAME is not a credential.
+
+def test_password_can_come_from_an_environment_variable(monkeypatch):
+    monkeypatch.setenv("SSAS_PW_FOR_TEST", "from-the-runtime")
+    src = SsasSource.create(
+        _config({**_BASE, "user": "reader", "passwordEnvVar": "SSAS_PW_FOR_TEST"}),
+        MagicMock(),
+    )
+    assert src.client is not None
+
+
+def test_a_missing_environment_variable_says_who_supplies_it(monkeypatch):
+    """The value comes from the runtime, not OpenMetadata, so the error has to
+    point at the runtime or the operator looks in the wrong place."""
+    monkeypatch.delenv("SSAS_PW_ABSENT", raising=False)
+    with pytest.raises(KeyError) as excinfo:
+        SsasSource.create(
+            _config({**_BASE, "user": "reader", "passwordEnvVar": "SSAS_PW_ABSENT"}),
+            MagicMock(),
+        )
+    message = str(excinfo.value)
+    assert "SSAS_PW_ABSENT" in message
+    assert "Kubernetes Secret" in message or "runtime" in message
+
+
+def test_an_empty_environment_variable_is_treated_as_missing(monkeypatch):
+    monkeypatch.setenv("SSAS_PW_EMPTY", "")
+    with pytest.raises(KeyError, match="SSAS_PW_EMPTY"):
+        SsasSource.create(
+            _config({**_BASE, "user": "reader", "passwordEnvVar": "SSAS_PW_EMPTY"}),
+            MagicMock(),
+        )
+
+
+def test_setting_both_password_and_passwordEnvVar_is_refused(monkeypatch):
+    """Not a precedence rule: an operator who edited the wrong one would see no
+    change and no message, and would still be using the credential they thought
+    they had replaced."""
+    monkeypatch.setenv("SSAS_PW_BOTH", "from-env")
+    with pytest.raises(KeyError, match="both"):
+        SsasSource.create(
+            _config({**_BASE, "user": "reader", "password": "literal",
+                     "passwordEnvVar": "SSAS_PW_BOTH"}),
+            MagicMock(),
+        )
+
+
+def test_a_literal_password_still_works(monkeypatch):
+    """The existing path is unchanged; passwordEnvVar is additive."""
+    src = SsasSource.create(
+        _config({**_BASE, "user": "reader", "password": "pw"}), MagicMock()
+    )
+    assert src.client is not None
+
+
+def test_the_env_var_name_is_not_treated_as_the_password(monkeypatch):
+    """Guards the obvious slip: reading opts['passwordEnvVar'] as the value."""
+    from ssas_om.source import _password_from
+
+    monkeypatch.setenv("SSAS_PW_NAMED", "the-real-secret")
+    assert _password_from({"passwordEnvVar": "SSAS_PW_NAMED"}) == "the-real-secret"

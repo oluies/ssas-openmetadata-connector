@@ -223,7 +223,8 @@ quoted (`"true"`, `"50"`) and parsed permissively by the connector: `_as_bool` a
 |---|---|---|---|---|
 | `authMechanism` | `basic` \| `ntlm` \| `kerberos` \| `negotiate` | no | **follows `transport`**: `basic` for `http`, `kerberos` for `tcp` | See [Choosing `authMechanism`](#choosing-authmechanism). `basic` on `tcp` is rejected, not coerced. |
 | `user` | string | **for `basic` / `ntlm`** | — | Reader account. Domain accounts take the `DOMAIN\user` form. |
-| `password` | string | **for `basic` / `ntlm`** | — | See [How the password is stored](#how-the-password-is-stored) before using this in production. |
+| `password` | string | **for `basic` / `ntlm`** | — | The credential itself. Stored unencrypted — see [How the password is stored](#how-the-password-is-stored). Prefer `passwordEnvVar`. |
+| `passwordEnvVar` | string | alternative to `password` | — | The **name** of an environment variable holding the password. The value never enters OpenMetadata. Setting both this and `password` is an error, not a precedence rule. |
 | `servicePrincipalClass` | string | no | `MSOLAPSvc.3` | The service class in the SPN requested for Kerberos. Change it only if the instance is registered under another class (SQL Browser uses `MSOLAPDisco.3`). |
 
 `user` and `password` are **not** required for `kerberos` or `negotiate`: those authenticate
@@ -286,14 +287,40 @@ If the password comes back in clear, it is stored in clear.
 
 **What to do about it**, in order of preference:
 
-1. **Use `kerberos`** and no password at all. The ticket comes from the runtime, not the
+1. **Use `passwordEnvVar`** and let the runtime supply the value. `connectionOptions` then
+   holds only a variable *name*, which is not a credential, and the password lives wherever
+   your platform already keeps secrets:
+
+   ```yaml
+   connectionOptions:
+     user: "DOMAIN\\svc_om_reader"
+     passwordEnvVar: "SSAS_PASSWORD"      # the NAME, not the value
+   ```
+
+   How the variable reaches the ingestion pod depends on how ingestion is spawned, and the two
+   paths differ in an important way:
+
+   | path | mechanism | can it reference a Secret? |
+   |---|---|---|
+   | `omjob-operator` | `OMJob.spec.mainPodSpec.env[]` | **yes** — the CRD supports `valueFrom.secretKeyRef` |
+   | chart passthrough | `pipelineServiceClientConfig.k8s.extraEnvVars` | **no** — schema is `array<string>`, serialised to a Helm-managed Secret, so literals only |
+
+   Either way the credential leaves the OpenMetadata database and stops being readable through
+   the service API. The `extraEnvVars` route applies the variable to *every* ingestion pod,
+   which is worth weighing — though a pod that can read it already receives every other
+   service's credentials from OpenMetadata anyway.
+
+   Locally the same option works with `run-ingestion.sh`, `docker compose`, or a plain
+   `export`.
+
+2. **Use `kerberos`** and no password at all. The ticket comes from the runtime, not the
    config. This is the only option that removes the credential rather than protecting it — see
    [`docs/kerberos-in-kubernetes.md`](docs/kerberos-in-kubernetes.md) for what that takes in
    Kubernetes, including two blockers worth knowing about first.
-2. **Give the account nothing worth stealing.** It needs only read on the SSAS databases; the
+3. **Give the account nothing worth stealing.** It needs only read on the SSAS databases; the
    connector never issues an admin-gated (TMSCHEMA) request, so a per-database reader role is
    sufficient. Scope it so disclosure is a nuisance, not an incident.
-3. **Restrict who can read the service** in OpenMetadata, since viewing it reveals the value.
+4. **Restrict who can read the service** in OpenMetadata, since viewing it reveals the value.
 
 ### Worked examples
 
@@ -307,7 +334,7 @@ connectionOptions:
   port: "2383"
   authMechanism: "ntlm"
   user: "DOMAIN\\svc_om_reader"
-  password: "${SSAS_PASSWORD}"
+  passwordEnvVar: "SSAS_PASSWORD"   # the NAME; the runtime supplies the value
   includeSampleData: "false"
 ```
 
