@@ -37,5 +37,5 @@ docker run --rm --network "$NET" --entrypoint metadata \
   -v "$PWD/src:/opt/connector:ro" \
   -v "$PWD/$RUNTIME:/ingest.yaml:ro" \
   -e PYTHONPATH=/opt/connector \
-  docker.getcollate.io/openmetadata/ingestion:1.13.3 \
+  docker.getcollate.io/openmetadata/ingestion:2.0.1.0 \
   ingest -c /ingest.yaml

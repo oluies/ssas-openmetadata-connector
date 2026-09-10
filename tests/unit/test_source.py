@@ -225,3 +225,193 @@ def test_sample_data_can_be_disabled():
                             "reader", "pw", transport=_sample_transport)
     list(src._iter())
     src.metadata.ingest_table_sample_data.assert_not_called()
+
+
+# --- credential handling by authMechanism -------------------------------------
+# These exercise the change directly rather than _requests_auth, which ignored
+# user/password for kerberos both before and after -- so a test against it would
+# have passed on the pre-change tree and proved nothing.
+
+def _config(options: dict) -> dict:
+    return {
+        "type": "customDatabase",
+        "serviceName": "ssas_tabular",
+        "serviceConnection": {
+            "config": {
+                "type": "CustomDatabase",
+                "sourcePythonClass": "ssas_om.source.SsasSource",
+                "connectionOptions": options,
+            }
+        },
+        "sourceConfig": {"config": {"type": "DatabaseMetadata"}},
+    }
+
+
+_BASE = {"host": "http://ssas.internal", "endpoint": "/olap-tab/msmdpump.dll"}
+
+
+@pytest.mark.parametrize("mechanism", ["kerberos", "negotiate"])
+def test_ticket_mechanisms_get_past_the_credential_check(mechanism):
+    """Previously raised KeyError: 'user' before authMechanism was even read, so a
+    Kerberos deployment had to put a dummy credential in the service config -- in
+    clear text, and not the credential actually used.
+
+    Without the [kerberos] extra installed the constructor still fails, but on the
+    missing-extra message rather than on credentials. That distinction IS the fix:
+    it proves user/password are no longer consulted on this path. Where the extra
+    is present, construction succeeds outright.
+    """
+    try:
+        src = SsasSource.create(_config({**_BASE, "authMechanism": mechanism}), MagicMock())
+    except RuntimeError as exc:
+        assert "extra" in str(exc)          # got past credentials to the dependency check
+        assert "user" not in str(exc)
+    except KeyError as exc:                  # the pre-fix behaviour
+        pytest.fail(f"still demands credentials for {mechanism}: {exc}")
+    else:
+        assert src.client is not None
+
+
+@pytest.mark.parametrize("mechanism", ["basic", "ntlm"])
+def test_password_mechanisms_still_require_credentials(mechanism):
+    with pytest.raises(KeyError) as excinfo:
+        SsasSource.create(_config({**_BASE, "authMechanism": mechanism}), MagicMock())
+    message = str(excinfo.value)
+    assert "user" in message and "password" in message
+    assert mechanism in message  # names the mechanism, not a bare KeyError
+
+
+def test_default_mechanism_is_basic_and_requires_credentials():
+    with pytest.raises(KeyError, match="basic"):
+        SsasSource.create(_config(dict(_BASE)), MagicMock())
+
+
+def test_basic_auth_source_constructs_with_credentials():
+    """The ordinary path still works -- the guard did not break it."""
+    src = SsasSource.create(
+        _config({**_BASE, "user": "reader", "password": "pw"}), MagicMock()
+    )
+    assert src.client is not None
+
+
+# --- the default mechanism follows the transport -------------------------------
+# HTTP Basic is msmdpump's IIS front end; the native binding speaks GSS-API only.
+# A single global default would make one of the two transports fail on a setting
+# the operator never wrote.
+
+_TCP_BASE = {"host": "ssas.internal", "transport": "tcp", "port": "2383"}
+
+
+def test_tcp_defaults_to_kerberos_and_asks_for_no_credentials():
+    """With no authMechanism the tcp path must reach the connect attempt, not stop
+    on a missing user/password -- which is what a 'basic' default would have done."""
+    try:
+        SsasSource.create(_config(dict(_TCP_BASE)), MagicMock())
+    except KeyError as exc:
+        pytest.fail(f"tcp default still demands credentials: {exc}")
+    except (RuntimeError, OSError, ConnectionError):
+        pass  # missing [tcp] extra, or no server -- both are past the config check
+
+
+def test_tcp_rejects_basic_before_touching_the_network():
+    from ssas_om.tcp_client import resolve_mechanism  # noqa: F401  (documents the origin)
+
+    with pytest.raises(ValueError, match="basic"):
+        SsasSource.create(
+            _config({**_TCP_BASE, "authMechanism": "basic",
+                     "user": "reader", "password": "pw"}),
+            MagicMock(),
+        )
+
+
+def test_tcp_requires_a_pinned_port():
+    """There is no default: guessing between a default instance's well-known port
+    and a named instance's pinned one presents to the operator as a hang."""
+    with pytest.raises(KeyError, match="port"):
+        SsasSource.create(
+            _config({"host": "ssas.internal", "transport": "tcp"}), MagicMock()
+        )
+
+
+def test_unknown_transport_is_rejected():
+    with pytest.raises(ValueError, match="carrier"):
+        SsasSource.create(
+            _config({**_BASE, "transport": "carrier", "user": "r", "password": "p"}),
+            MagicMock(),
+        )
+
+
+def test_http_still_demands_an_endpoint_and_says_which_option():
+    """Relaxing `endpoint` for tcp must not make it optional for http, where a
+    missing msmdpump path would otherwise POST to the bare host."""
+    with pytest.raises(KeyError, match="endpoint"):
+        SsasSource.create(
+            _config({"host": "http://ssas.internal", "user": "r", "password": "p"}),
+            MagicMock(),
+        )
+
+
+# --- the password can come from the environment instead of the config ----------
+# connectionOptions is dict[str, str] in the OpenMetadata schema with no password
+# format, so a literal password is stored unencrypted and returned by the API to
+# anyone who may view the service. A variable NAME is not a credential.
+
+def test_password_can_come_from_an_environment_variable(monkeypatch):
+    monkeypatch.setenv("SSAS_PW_FOR_TEST", "from-the-runtime")
+    src = SsasSource.create(
+        _config({**_BASE, "user": "reader", "passwordEnvVar": "SSAS_PW_FOR_TEST"}),
+        MagicMock(),
+    )
+    assert src.client is not None
+
+
+def test_a_missing_environment_variable_says_who_supplies_it(monkeypatch):
+    """The value comes from the runtime, not OpenMetadata, so the error has to
+    point at the runtime or the operator looks in the wrong place."""
+    monkeypatch.delenv("SSAS_PW_ABSENT", raising=False)
+    with pytest.raises(KeyError) as excinfo:
+        SsasSource.create(
+            _config({**_BASE, "user": "reader", "passwordEnvVar": "SSAS_PW_ABSENT"}),
+            MagicMock(),
+        )
+    message = str(excinfo.value)
+    assert "SSAS_PW_ABSENT" in message
+    assert "Kubernetes Secret" in message or "runtime" in message
+
+
+def test_an_empty_environment_variable_is_treated_as_missing(monkeypatch):
+    monkeypatch.setenv("SSAS_PW_EMPTY", "")
+    with pytest.raises(KeyError, match="SSAS_PW_EMPTY"):
+        SsasSource.create(
+            _config({**_BASE, "user": "reader", "passwordEnvVar": "SSAS_PW_EMPTY"}),
+            MagicMock(),
+        )
+
+
+def test_setting_both_password_and_passwordEnvVar_is_refused(monkeypatch):
+    """Not a precedence rule: an operator who edited the wrong one would see no
+    change and no message, and would still be using the credential they thought
+    they had replaced."""
+    monkeypatch.setenv("SSAS_PW_BOTH", "from-env")
+    with pytest.raises(KeyError, match="both"):
+        SsasSource.create(
+            _config({**_BASE, "user": "reader", "password": "literal",
+                     "passwordEnvVar": "SSAS_PW_BOTH"}),
+            MagicMock(),
+        )
+
+
+def test_a_literal_password_still_works(monkeypatch):
+    """The existing path is unchanged; passwordEnvVar is additive."""
+    src = SsasSource.create(
+        _config({**_BASE, "user": "reader", "password": "pw"}), MagicMock()
+    )
+    assert src.client is not None
+
+
+def test_the_env_var_name_is_not_treated_as_the_password(monkeypatch):
+    """Guards the obvious slip: reading opts['passwordEnvVar'] as the value."""
+    from ssas_om.source import _password_from
+
+    monkeypatch.setenv("SSAS_PW_NAMED", "the-real-secret")
+    assert _password_from({"passwordEnvVar": "SSAS_PW_NAMED"}) == "the-real-secret"

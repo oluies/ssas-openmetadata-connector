@@ -28,3 +28,11 @@ def test_machine_autodetected_from_domain_user():
     assert detect_machine(f"{machine}\\svc needs admin", "svc") == machine
     scrub = make_scrubber(user="svc")
     assert machine not in scrub(f"{machine}\\svc failed")
+
+
+def test_machine_name_is_redacted_without_a_user():
+    """Regression: NetBIOS redaction ran only via `user_adjacent`, which is None
+    when no user is configured — so making user optional for Kerberos silently
+    disabled it."""
+    out = make_scrubber(host="ssas.example.com")("machine " + "WIN-" + "AB12CD34" + " responded")
+    assert "WIN-" + "AB12CD34" not in out

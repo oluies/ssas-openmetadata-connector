@@ -10,6 +10,7 @@ request is ever issued.
 """
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -87,6 +88,53 @@ _XNAME = re.compile(r"_x([0-9A-Fa-f]{4})_")
 _DAX_COL = re.compile(r"^.*\[(?P<col>.*)\]$")
 
 
+# Each binding offers its own set of mechanisms, so the default follows the
+# transport: msmdpump sits behind IIS and answers HTTP Basic, while the native
+# binding authenticates with GSS-API only and has no Basic to fall back to.
+_DEFAULT_MECHANISM = {"http": "basic", "tcp": "kerberos"}
+
+
+def _password_from(opts: dict[str, Any]) -> str:
+    """The password, from `connectionOptions` or from the environment.
+
+    `passwordEnvVar` names an environment variable; the value never enters
+    OpenMetadata. That matters because `connectionOptions` is typed
+    `dict[str, str]` in the OpenMetadata schema with no password format, so a
+    literal `password` is stored unencrypted and returned by the API to anyone who
+    may view the service — see "How the password is stored" in the README. A
+    variable NAME is not a credential, so it is safe to hold there.
+
+    Both set is an error rather than a precedence rule. Silently preferring one
+    would mean an operator who edited the wrong one would see no change and no
+    message, and would be authenticating with a credential they thought they had
+    replaced.
+    """
+    literal = opts.get("password")
+    env_name = opts.get("passwordEnvVar")
+    if literal and env_name:
+        raise KeyError(
+            "connectionOptions sets both 'password' and 'passwordEnvVar'; use one. "
+            "'passwordEnvVar' keeps the credential out of OpenMetadata entirely."
+        )
+    if not env_name:
+        return str(literal or "")
+    value = os.environ.get(str(env_name))
+    if not value:
+        raise KeyError(
+            f"connectionOptions sets passwordEnvVar={str(env_name)!r}, but that "
+            f"environment variable is unset or empty in the ingestion runtime. "
+            f"The value is supplied by the runtime (a Kubernetes Secret, the "
+            f"compose env, or run-ingestion.sh), not by OpenMetadata."
+        )
+    return value
+
+
+def _bare_host(host: str) -> str:
+    """Strip a URL scheme and path: the TCP binding takes a hostname, not a URL."""
+    bare = re.sub(r"^\w+://", "", host).strip("/")
+    return bare.split("/", 1)[0].split(":", 1)[0]
+
+
 def _dax_column_name(key: str) -> str:
     decoded = _XNAME.sub(lambda m: chr(int(m.group(1), 16)), key)
     m = _DAX_COL.match(decoded)
@@ -102,7 +150,9 @@ class SsasSource(Source):
             config.serviceConnection.root.config.connectionOptions.root
         )
         self.host = str(opts["host"]).rstrip("/")
-        self.endpoint = str(opts["endpoint"])
+        # `endpoint` is the msmdpump path inside IIS and has no meaning on the
+        # native binding, so it is demanded per transport rather than always.
+        self.endpoint = str(opts.get("endpoint", ""))
         self.catalog_opt = opts.get("catalog")
         # optional table-level lineage target (the SQL source ingested separately)
         self.lineage_service = opts.get("lineageService")
@@ -112,12 +162,74 @@ class SsasSource(Source):
         self.include_sample_data = _as_bool(opts.get("includeSampleData"), True)
         self.sample_data_row_count = _as_int(opts.get("sampleDataRowCount"), 50)
         self.service_name = config.serviceName
-        self.client = XmlaClient(
-            url=self.host + self.endpoint,
-            user=str(opts["user"]),
-            password=str(opts["password"]),
-            auth_mechanism=str(opts.get("authMechanism", "basic")),
-        )
+        transport = str(opts.get("transport", "http")).lower()
+        # The default mechanism follows the transport, because the two bindings do
+        # not offer the same set: HTTP Basic is msmdpump's IIS front end, and the
+        # native binding speaks GSS-API only. Defaulting tcp to 'basic' would make
+        # the common case fail on a setting the operator never wrote.
+        mech = str(
+            opts.get("authMechanism") or _DEFAULT_MECHANISM.get(transport, "basic")
+        ).lower()
+        # kerberos/negotiate authenticate from the ambient ticket cache -- see
+        # _requests_auth, which ignores user/password for those mechanisms. Demanding
+        # them anyway forced a dummy credential into the service config, where it sat
+        # in clear text doing nothing. basic/ntlm still require both.
+        if mech in ("kerberos", "negotiate"):
+            user = str(opts.get("user", ""))
+            password = _password_from(opts)
+        else:
+            password = _password_from(opts)
+            missing = [k for k in ("user",) if not opts.get(k)]
+            if not password:
+                missing.append("password")
+            if missing:
+                raise KeyError(
+                    f"connectionOptions is missing {' and '.join(missing)}, which "
+                    f"authMechanism={mech!r} requires. Only kerberos and negotiate "
+                    f"authenticate without them, from the ambient ticket cache. "
+                    f"'password' may instead be supplied as 'passwordEnvVar', the "
+                    f"NAME of an environment variable holding it."
+                )
+            user = str(opts["user"])
+        if transport == "tcp":
+            # Native XMLA/TCP: no IIS in front of the instance. The port must be
+            # PINNED in msmdsrv.ini -- the named-instance redirector on 2382 has
+            # no public specification and is not used.
+            from .tcp_client import TcpXmlaClient
+
+            port = opts.get("port")
+            if not port:
+                raise KeyError(
+                    "transport='tcp' requires 'port' in connectionOptions: the "
+                    "instance's pinned TCP port. There is no default, because "
+                    "guessing between a default instance's well-known port and a "
+                    "named instance's pinned one presents as a hang."
+                )
+            self.client = TcpXmlaClient(
+                host=_bare_host(self.host),
+                port=int(port),
+                user=user,
+                password=password,
+                auth_mechanism=mech,
+                service=str(opts.get("servicePrincipalClass", "MSOLAPSvc.3")),
+            )
+        elif transport == "http":
+            if not self.endpoint:
+                raise KeyError(
+                    "connectionOptions is missing 'endpoint', which transport="
+                    "'http' requires: the msmdpump path, e.g. "
+                    "'/olap-tab/msmdpump.dll'."
+                )
+            self.client = XmlaClient(
+                url=self.host + self.endpoint,
+                user=user,
+                password=password,
+                auth_mechanism=mech,
+            )
+        else:
+            raise ValueError(
+                f"unknown transport {transport!r}; expected 'http' or 'tcp'"
+            )
 
     @classmethod
     def create(
