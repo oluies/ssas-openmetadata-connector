@@ -57,7 +57,7 @@ catch defects early and keep the spec and code aligned.
 ## Security & Data-Handling Constraints
 
 - Secrets: `.env` only, gitignored; a committed `.env.example` carries placeholders.
-- OpenMetadata is pinned to **1.13.3**; the ingestion base image and compose MUST match.
+- OpenMetadata is pinned to **2.0.1**; the ingestion base image and compose MUST match.
 - SQL Server and Analysis Services are remote (Hetzner) and MUST NOT appear in any compose
   file; only OpenMetadata, its datastore, its search backend and the connector run locally.
 - Transport to SSAS is plain-HTTP Basic auth to msmdpump; the connector MUST treat this as

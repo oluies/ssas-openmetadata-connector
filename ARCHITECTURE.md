@@ -104,21 +104,58 @@ a `test_connection` probe uses `DISCOVER_DATASOURCES` and fails loudly on a 401/
 
 ## Authentication
 
-The SSAS endpoint is IIS `msmdpump`, which can front several IIS auth schemes. The client
-selects one per `authMechanism`:
+The mechanism is chosen per `authMechanism`, but **the set on offer depends on the
+transport** — this is the one place the two bindings are not interchangeable. HTTP Basic is a
+property of the IIS front end `msmdpump` runs behind; the native binding authenticates with
+GSS-API and has nothing to fall back to.
 
 ```mermaid
 flowchart TD
-    opt["authMechanism"] --> basic["basic (default)\nHTTP Basic\nno extra deps"]
-    opt --> krb["kerberos / negotiate\nrequests-kerberos\nneeds ticket cache / SSPI"]
-    opt --> ntlm["ntlm\nrequests-ntlm"]
+    opt["authMechanism"] --> http["transport: http\nIIS msmdpump"]
+    opt --> tcp["transport: tcp\nnative binding"]
+    http --> basic["basic (default here)\nHTTP Basic\nno extra deps"]
+    http --> hkrb["kerberos / negotiate\nrequests-kerberos"]
+    http --> hntlm["ntlm\nrequests-ntlm"]
+    tcp --> reject["basic\nREJECTED"]
+    tcp --> tkrb["kerberos (default here) / negotiate\npyspnego, ticket cache"]
+    tcp --> tntlm["ntlm\npyspnego, needs password"]
     basic --> sess["requests.Session.auth"]
-    krb --> sess
-    ntlm --> sess
+    hkrb --> sess
+    hntlm --> sess
+    tkrb --> gss["ssas_xmla Credential\nAuthenticate/AuthenticateResponse loop"]
+    tntlm --> gss
 ```
 
-Kerberos/NTLM ship as optional extras (`[kerberos]`, `[ntlm]`); requesting one without the
-extra installed raises a clear install message. Basic over plain HTTP is credentials-in-clear,
+Two consequences of that split, both deliberate:
+
+- **The default follows the transport** (`_DEFAULT_MECHANISM` in `source.py`): `basic` for
+  `http`, `kerberos` for `tcp`. A single global default would make one of the two transports
+  fail on a setting the operator never wrote.
+- **`basic` on `tcp` is rejected, not coerced.** An earlier version mapped it onto
+  `kerberos`, which discarded the supplied password and authenticated as whoever held a
+  ticket. A silently *different identity* is worse than a refusal, so `resolve_mechanism`
+  refuses and names the alternatives. `ntlm` without a password is refused for the same
+  reason: NTLM derives its key from the password and cannot read a ticket cache.
+
+`endpoint` follows the same rule — it is the `msmdpump` path inside IIS, so it is demanded
+for `http` and ignored for `tcp`, where `port` (the instance's pinned TCP port) is required
+instead.
+
+Kerberos/NTLM over HTTP ship as optional extras (`[kerberos]`, `[ntlm]`), and the native
+binding as `[tcp]`; requesting one without the extra installed raises a clear install
+message.
+
+**`kerberos` and `negotiate` need no `user`/`password`.** They authenticate from the ambient
+ticket cache, and `_requests_auth` ignores both. The Source therefore does not demand them for
+those mechanisms — requiring them forced a dummy credential into the service config, where it
+sat in clear text *and* was not the credential in use. `basic` and `ntlm` still require both,
+and say which keys are missing rather than raising a bare `KeyError`.
+
+One consequence worth stating, because it is easy to reintroduce: the runtime scrubber's
+machine-name redaction must not be keyed on `user`. It once ran only through the `DOMAIN\user`
+pattern, so making `user` optional silently disabled NetBIOS redaction for exactly the
+deployment the change enabled. There is now a standalone pattern that does not depend on a
+user being configured. Basic over plain HTTP is credentials-in-clear,
 so it is meant only behind a network firewall or with HTTPS in front; the connector never
 logs request bodies or the `Authorization` header. The MSSQL lineage source is a separate,
 built-in OpenMetadata connector (via `pymssql`) with its own auth.
@@ -151,13 +188,20 @@ flowchart LR
     fixtures --> stub["docker/ssas-stub\nreplays fixtures"]
     unit --> gate["offline gate:\nno network, no leaks"]
     stub --> integ["integration without the host"]
-    live["live SSAS + OM 1.13.3"] --> accept["acceptance run only"]
+    live["live SSAS + OM 2.0.1"] --> accept["acceptance run only"]
 ```
 
 - **Unit** — every parser/mapper/client path against fixtures, with `pytest-socket` blocking
-  all sockets. A pattern-based leak-check asserts no fixture carries an identifying token.
+  all sockets. Tests touching `source.py` need the OpenMetadata SDK and are `importorskip`-gated,
+  so they skip locally and run in the `test-sdk` CI job inside the ingestion image; a test that
+  only ever skips proves nothing, so those are verified there rather than assumed.
+- **Leak gate** — `tests/hooks/test_leak_gate.sh` pins the commit gate's boundary in both
+  directions: a container image tag must pass, a file path carrying a real address must not.
+  Its fixtures are assembled at runtime, because written literally they are exactly what the
+  gate blocks. CI runs the gate over every tracked file, not only staged ones, so a bypassed
+  hook or a rebase cannot slip a token through.
 - **Integration** — the stub server replays fixtures so the pipeline can run with no host.
-- **Acceptance** — a real ingestion into a live OpenMetadata 1.13.3, used to prove the
+- **Acceptance** — a real ingestion into a live OpenMetadata 2.0.1, used to prove the
   end-to-end result; never a prerequisite for the unit suite (the operator IP is allowlisted
   and changes).
 
@@ -167,3 +211,7 @@ flowchart LR
   fixture, log line or commit message (pre-commit leak-gate).
 - Reader-only access; no TMSCHEMA/admin rowset.
 - Deterministic, offline unit tests.
+- Dependency updates are Renovate's, and `openmetadata-ingestion` is dashboard-approval only:
+  both series exist on PyPI, so a bump does not error — pip silently changes the SDK inside the
+  ingestion image and breaks every other connector alongside this one. A real change must move
+  `docker/compose.yml`, `scripts/run-ingestion.sh` and the constitution pin together.
