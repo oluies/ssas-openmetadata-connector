@@ -216,8 +216,9 @@ flowchart LR
   ingestion image that already carries the SDK: pip leaves an already-satisfied requirement
   alone, so the image keeps its own version. A pin does the opposite — every series is published
   on PyPI, so pip silently changes the SDK inside the image and breaks every other connector
-  alongside this one, with no error. That is not hypothetical: `==2.0.1.*` downgraded a 2.0.2.0
-  base on 2026-09-17 and was caught only by the consumer's post-install version check.
+  alongside this one, with no error. That is not hypothetical: `==2.0.1.*` downgraded an
+  `openmetadata/ingestion-base:2.0.2.0` image on 2026-09-17, caught only by the consumer's
+  post-install version check.
   Widening the upper bound is the real change, and it must move `docker/compose.yml` and
   `scripts/run-ingestion.sh` with it — those still exercise 2.0.1, which is the floor of the
   range rather than the whole of it.

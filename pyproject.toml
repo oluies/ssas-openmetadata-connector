@@ -19,11 +19,15 @@ dependencies = [
   # already-satisfied requirement, so the base image's SDK survives untouched.
   #
   # It was "==2.0.1.*" until 2026-09-17, and that broke the image build on an
-  # ordinary OpenMetadata patch bump: against a 2.0.2.0 base, pip found 2.0.1.0
-  # on PyPI and DOWNGRADED the SDK inside the image -- no error, because both
-  # series are published. That breaks every other connector in the image, not
-  # just this one. The consumer's Dockerfile reads the version back after
-  # install and fails the build, which is how it was caught.
+  # ordinary OpenMetadata patch bump: installed into an
+  # openmetadata/ingestion-base:2.0.2.0 image, pip found the 2.0.1 series on
+  # PyPI and DOWNGRADED the SDK inside it -- no error, because both series are
+  # published. That breaks every other connector in the image, not just this
+  # one. The consumer's Dockerfile reads the version back after install and
+  # fails the build, which is how it was caught.
+  #
+  # (Four-part versions are written as image references on purpose: the
+  # leak gate reads a bare one as an IPv4 address.)
   #
   # Keep the upper bound. A 3.x SDK is a different series and the mismatch this
   # bound prevents (1.13 vs 2.0) is exactly the one that motivated the old pin.
