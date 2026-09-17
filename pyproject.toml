@@ -27,7 +27,16 @@ kerberos = ["requests-kerberos>=0.14"]
 # A separate package on purpose: it is a general protocol implementation whose
 # only dependency is pyspnego, and pulling the OpenMetadata SDK into it would
 # make it unusable for anyone outside this project.
-tcp = ["ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@main"]
+#
+# Pinned to a tag, not a branch. Consumers install this connector from git, so
+# a floating @main here meant a push to the transport repo changed what they
+# got with no change to this package and no way to reproduce an earlier
+# install. Pinning it HERE rather than in the consumer is the only place it
+# works: a consumer that adds its own direct reference for ssas-xmla-tcp while
+# also requesting [tcp] gives pip two direct URLs for one distribution, which
+# is ResolutionImpossible -- and it only fails once the two refs diverge, i.e.
+# the moment the pin starts doing its job.
+tcp = ["ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@v0.1.0"]
 ntlm = ["requests-ntlm>=1.2"]
 dev = [
   "pytest>=8",

@@ -84,10 +84,13 @@ jobs:
           assert dep, "the tcp extra declares no requirement"
           print("declared:", dep[0])
           EOF
+      # Must name the SAME ref as the [tcp] extra in pyproject.toml. Left at
+      # @main it would happily prove that some other commit installs, which is
+      # not the question this step exists to answer.
       - name: the [tcp] extra's target actually installs
         run: |
           uv pip install --python .pkgcheck --no-deps --dry-run \
-            "ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@main"
+            "ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@v0.1.0"
 
   test-offline:
     name: offline unit tests (py ${{ matrix.python-version }})
