@@ -13,10 +13,25 @@ license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Örjan Lundberg" }]
 dependencies = [
   "requests>=2.31",
-  # Must match the SDK series of the ingestion image this is installed into.
-  # A mismatch is not an error: both series exist on PyPI, so pip DOWNGRADES the
-  # SDK inside the image and breaks every other connector, not just this one.
-  "openmetadata-ingestion==2.0.1.*",
+  # A RANGE, not a pin. This is installed INTO an ingestion image that already
+  # carries the SDK, so the job here is to declare the series we work against
+  # and then leave the image's own version alone. pip does not touch an
+  # already-satisfied requirement, so the base image's SDK survives untouched.
+  #
+  # It was "==2.0.1.*" until 2026-09-17, and that broke the image build on an
+  # ordinary OpenMetadata patch bump: installed into an
+  # openmetadata/ingestion-base:2.0.2.0 image, pip found the 2.0.1 series on
+  # PyPI and DOWNGRADED the SDK inside it -- no error, because both series are
+  # published. That breaks every other connector in the image, not just this
+  # one. The consumer's Dockerfile reads the version back after install and
+  # fails the build, which is how it was caught.
+  #
+  # (Four-part versions are written as image references on purpose: the
+  # leak gate reads a bare one as an IPv4 address.)
+  #
+  # Keep the upper bound. A 3.x SDK is a different series and the mismatch this
+  # bound prevents (1.13 vs 2.0) is exactly the one that motivated the old pin.
+  "openmetadata-ingestion>=2.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -27,7 +42,16 @@ kerberos = ["requests-kerberos>=0.14"]
 # A separate package on purpose: it is a general protocol implementation whose
 # only dependency is pyspnego, and pulling the OpenMetadata SDK into it would
 # make it unusable for anyone outside this project.
-tcp = ["ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@main"]
+#
+# Pinned to a tag, not a branch. Consumers install this connector from git, so
+# a floating @main here meant a push to the transport repo changed what they
+# got with no change to this package and no way to reproduce an earlier
+# install. Pinning it HERE rather than in the consumer is the only place it
+# works: a consumer that adds its own direct reference for ssas-xmla-tcp while
+# also requesting [tcp] gives pip two direct URLs for one distribution, which
+# is ResolutionImpossible -- and it only fails once the two refs diverge, i.e.
+# the moment the pin starts doing its job.
+tcp = ["ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@v0.1.0"]
 ntlm = ["requests-ntlm>=1.2"]
 dev = [
   "pytest>=8",

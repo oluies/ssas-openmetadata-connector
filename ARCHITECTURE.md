@@ -211,7 +211,14 @@ flowchart LR
   fixture, log line or commit message (pre-commit leak-gate).
 - Reader-only access; no TMSCHEMA/admin rowset.
 - Deterministic, offline unit tests.
-- Dependency updates are Renovate's, and `openmetadata-ingestion` is dashboard-approval only:
-  both series exist on PyPI, so a bump does not error — pip silently changes the SDK inside the
-  ingestion image and breaks every other connector alongside this one. A real change must move
-  `docker/compose.yml`, `scripts/run-ingestion.sh` and the constitution pin together.
+- Dependency updates are Renovate's, and `openmetadata-ingestion` is dashboard-approval only.
+  It is declared as a RANGE (`>=2.0,<3`), not a pin, because this package is installed into an
+  ingestion image that already carries the SDK: pip leaves an already-satisfied requirement
+  alone, so the image keeps its own version. A pin does the opposite — every series is published
+  on PyPI, so pip silently changes the SDK inside the image and breaks every other connector
+  alongside this one, with no error. That is not hypothetical: `==2.0.1.*` downgraded an
+  `openmetadata/ingestion-base:2.0.2.0` image on 2026-09-17, caught only by the consumer's
+  post-install version check.
+  Widening the upper bound is the real change, and it must move `docker/compose.yml` and
+  `scripts/run-ingestion.sh` with it — those still exercise 2.0.1, which is the floor of the
+  range rather than the whole of it.
