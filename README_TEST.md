@@ -80,6 +80,25 @@ docker run --rm --user root -v "$PWD:/w" -w /w -e PYTHONPATH=/w/src --entrypoint
 `--user root` is for the bind-mount, and `-p no:cacheprovider` keeps pytest from writing a
 cache directory into your working tree as root.
 
+**If `getcollate.io` is unreachable** — a corporate proxy, a locked-down WSL — use the Docker
+Hub name instead. It is not a rebuild or a mirror that might drift; both registries serve the
+same linux/amd64 digest (`sha256:42a3c912…` for `openmetadata/ingestion:2.0.1.0`,
+`sha256:aca874af…` for `openmetadata/ingestion:2.0.2`), which you can check yourself:
+
+```bash
+docker manifest inspect openmetadata/ingestion:2.0.2                      | grep -A2 amd64
+docker manifest inspect docker.getcollate.io/openmetadata/ingestion:2.0.2 | grep -A2 amd64
+```
+
+Swap the registry prefix in the command above, and see the build arg in layer 6.
+
+**Match the image to your OpenMetadata.** This suite passes inside both
+`openmetadata/ingestion:2.0.1.0` and `openmetadata/ingestion:2.0.2`, and the SDK requirement is
+a range so the image keeps its own SDK — but build on the version you ingest into. Upstream tag
+shapes differ, four-part against three, as those two names show. `compose.yml` and CI still
+name the 2.0.1 series, so a whole stack brought up from this repo comes up on it unless you
+change them, and the Collate registry appears there in four places.
+
 Expect *more* tests than layer 1 — the ones that skipped there now run.
 
 ## 5. Prove the binding before you ingest over it
@@ -181,6 +200,9 @@ thin image once:
 
 ```bash
 docker build -t ssas-ingestion:tcp -f docker/Dockerfile.tcp docker/
+# a different registry, a different OpenMetadata version, or both:
+#   docker build -t ssas-ingestion:tcp -f docker/Dockerfile.tcp docker/ \
+#     --build-arg BASE_IMAGE=openmetadata/ingestion:2.0.2
 INGESTION_IMAGE=ssas-ingestion:tcp ./scripts/run-ingestion.sh config/ingestion-tcp.yaml.tmpl
 ```
 

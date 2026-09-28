@@ -2,7 +2,32 @@
 # the native binding needs. Everything else about the dev loop is unchanged: the
 # connector itself still arrives as a bind-mount on PYTHONPATH, so connector edits
 # need no rebuild; only a change of the library pin does.
-FROM docker.getcollate.io/openmetadata/ingestion:2.0.1.0
+# The base image is an ARGUMENT because two things about it vary per site, and
+# neither is a reason to fork this file.
+#
+# REGISTRY. The same image is published to both registries, and it is the same
+# bytes -- not a mirror that can drift. For linux/amd64,
+# `openmetadata/ingestion:2.0.1.0` and
+# `docker.getcollate.io/openmetadata/ingestion:2.0.1.0` both resolve to
+# sha256:42a3c912..., and the 2.0.2 pair both resolve to sha256:aca874af...
+# (`docker manifest inspect` each and compare). So a network that cannot reach
+# getcollate.io -- a corporate proxy, a locked-down WSL -- only needs the other
+# name.
+#
+# VERSION. This image must match the OpenMetadata the ingestion runs into; the
+# SDK requirement in pyproject.toml is a RANGE precisely so the image's own SDK
+# survives. Upstream tags are not shaped alike -- compare
+# `openmetadata/ingestion:2.0.1.0` with `openmetadata/ingestion:2.0.2` -- and a
+# version is always written here as part of an image reference, because the leak
+# gate reads a bare four-part one as an IPv4 address and refuses the file.
+#
+#   docker build -t ssas-ingestion:tcp -f docker/Dockerfile.tcp docker/ \
+#     --build-arg BASE_IMAGE=openmetadata/ingestion:2.0.2
+#
+# The default stays the Collate registry at the version compose.yml and CI use;
+# a default that disagrees with them is its own kind of trap.
+ARG BASE_IMAGE=docker.getcollate.io/openmetadata/ingestion:2.0.1.0
+FROM ${BASE_IMAGE}
 
 USER root
 # `python -m pip`, not `pip`: the image's pip is a wrapper that refuses to run as

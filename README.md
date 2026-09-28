@@ -606,6 +606,12 @@ docker build -t ssas-ingestion:tcp -f docker/Dockerfile.tcp docker/
 INGESTION_IMAGE=ssas-ingestion:tcp ./scripts/run-ingestion.sh config/ingestion-tcp.yaml.tmpl
 ```
 
+`BASE_IMAGE` is a build argument, for the two things that vary per site. Where
+`getcollate.io` is not reachable, `--build-arg BASE_IMAGE=openmetadata/ingestion:2.0.1.0` gets
+the same image from Docker Hub — the same digest, not a mirror that can drift. Where the stack
+is a different OpenMetadata, name that instead, e.g.
+`--build-arg BASE_IMAGE=openmetadata/ingestion:2.0.2`, whose suite run is green too.
+
 Prove the binding on its own before ingesting over it — the library ships a probe, and a
 failing probe tells you which of server, account and transport is at fault while an
 ingestion failure does not. See [`README_TEST.md`](README_TEST.md).
