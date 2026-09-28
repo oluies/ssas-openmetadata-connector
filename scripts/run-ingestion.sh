@@ -19,7 +19,7 @@ for _v in $(grep -oE '\$\{[A-Z_]+\}' "$TMPL" | tr -d '${}' | sort -u); do
   eval ": \"\${$_v:?required by $TMPL}\""
 done
 
-envsubst '${SSAS_HOST} ${SSAS_USER} ${SSAS_PASSWORD} ${MSSQL_HOST} ${MSSQL_USER} ${MSSQL_PASSWORD} ${OM_JWT_TOKEN}' < "$TMPL" > "$RUNTIME"
+envsubst '${SSAS_HOST} ${SSAS_TCP_PORT} ${SSAS_USER} ${SSAS_PASSWORD} ${MSSQL_HOST} ${MSSQL_USER} ${MSSQL_PASSWORD} ${OM_JWT_TOKEN}' < "$TMPL" > "$RUNTIME"
 
 if [ -n "${OM_NETWORK:-}" ]; then
   NET="$OM_NETWORK"
@@ -33,9 +33,15 @@ else
     exit 1
   fi
 fi
+# transport: tcp needs ssas-xmla-tcp in the runtime, which the stock image does not
+# carry and the bind-mount cannot supply -- it mounts the connector, not its
+# dependencies. Build docker/Dockerfile.tcp and name it here:
+#   INGESTION_IMAGE=ssas-ingestion:tcp ./scripts/run-ingestion.sh config/ingestion-tcp.yaml.tmpl
+IMAGE="${INGESTION_IMAGE:-docker.getcollate.io/openmetadata/ingestion:2.0.1.0}"
+
 docker run --rm --network "$NET" --entrypoint metadata \
   -v "$PWD/src:/opt/connector:ro" \
   -v "$PWD/$RUNTIME:/ingest.yaml:ro" \
   -e PYTHONPATH=/opt/connector \
-  docker.getcollate.io/openmetadata/ingestion:2.0.1.0 \
+  "$IMAGE" \
   ingest -c /ingest.yaml

@@ -144,6 +144,11 @@ export OM_JWT_TOKEN=...        # e.g. admin login token from your OM instance
 ./scripts/run-ingestion.sh config/ingestion-md.yaml.tmpl        # multidimensional
 # the built-in MSSQL source (lineage target):
 ./scripts/run-ingestion.sh config/ingestion-mssql.yaml.tmpl
+
+# the same tabular models over the NATIVE TCP binding, with no IIS in front
+# (needs the [tcp] runtime -- see below):
+docker build -t ssas-ingestion:tcp -f docker/Dockerfile.tcp docker/
+INGESTION_IMAGE=ssas-ingestion:tcp ./scripts/run-ingestion.sh config/ingestion-tcp.yaml.tmpl
 ```
 
 > **Upgrading an existing stack?** This is a clean-start recipe. `mysql` bind-mounts
@@ -590,6 +595,21 @@ connectionOptions:
   authMechanism: "kerberos"
 ```
 
+A ready template is committed as [`config/ingestion-tcp.yaml.tmpl`](config/ingestion-tcp.yaml.tmpl)
+(tabular, NTLM, its own `ssas_tabular_tcp` service so it does not overwrite the HTTP-ingested
+one). The runtime it needs is [`docker/Dockerfile.tcp`](docker/Dockerfile.tcp) — the stock
+ingestion image does not carry `ssas-xmla-tcp`, and the dev bind-mount cannot supply it,
+since it mounts the connector rather than its dependencies:
+
+```bash
+docker build -t ssas-ingestion:tcp -f docker/Dockerfile.tcp docker/
+INGESTION_IMAGE=ssas-ingestion:tcp ./scripts/run-ingestion.sh config/ingestion-tcp.yaml.tmpl
+```
+
+Prove the binding on its own before ingesting over it — the library ships a probe, and a
+failing probe tells you which of server, account and transport is at fault while an
+ingestion failure does not. See [`README_TEST.md`](README_TEST.md).
+
 Two requirements, both about addressing:
 
 - **The port must be pinned** in the instance's `msmdsrv.ini`. A named instance uses a dynamic
@@ -668,6 +688,10 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md#authentication) for the diagram.
 
 ## Testing
 
+**[`README_TEST.md`](README_TEST.md) is the full guide** — six layers from the hermetic unit
+suite to a live ingestion run, what each one proves, and what a failure at each layer means.
+The short version:
+
 Unit tests are **offline and hermetic** — sockets are disabled and every response comes from
 recorded, scrubbed fixtures under `tests/fixtures/xmla/`. They never touch the live host.
 
@@ -692,11 +716,12 @@ username, machine name, SID or connection string (enforced by a pre-commit leak-
 
 ```
 src/ssas_om/        connector: client, parsers (csdl, mdschema), mappers, source, redaction
-config/             committed ingestion templates (no secrets)
-docker/             OpenMetadata 2.0.1 compose + a fixture stub server
+config/             committed ingestion templates (no secrets), incl. ingestion-tcp for the native binding
+docker/             OpenMetadata 2.0.1 compose, a fixture stub server, Dockerfile.tcp for the [tcp] runtime
 scripts/            probe.py (discovery) and run-ingestion.sh
 tests/              offline unit tests + recorded fixtures
 specs/, docs/       spec-kit artefacts, discovery report, normative references
+README_TEST.md      how to test all of it, from the hermetic suite to a live run
 ```
 
 ## License
