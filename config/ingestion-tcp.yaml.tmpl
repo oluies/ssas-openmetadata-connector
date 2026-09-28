@@ -1,0 +1,71 @@
+# Tabular SSAS ingestion over the NATIVE XMLA/TCP binding — no IIS, no msmdpump.
+# Committed as a TEMPLATE — no secrets; the run script substitutes ${...} from .env
+# into a gitignored runtime copy.
+#
+# The runtime needs the [tcp] extra (ssas-xmla-tcp + pyspnego). The stock ingestion
+# image does not carry it and the dev bind-mount does not install it, so build
+# docker/Dockerfile.tcp and point the run script at it:
+#
+#   docker build -t ssas-ingestion:tcp -f docker/Dockerfile.tcp docker/
+#   INGESTION_IMAGE=ssas-ingestion:tcp ./scripts/run-ingestion.sh config/ingestion-tcp.yaml.tmpl
+#
+# See README_TEST.md for the whole path, including proving the binding first.
+source:
+  type: customDatabase
+  # A SEPARATE service from ssas_tabular on purpose: ingesting the same models over
+  # both bindings into one service would overwrite it, leaving no way to compare the
+  # two. Rename it to ssas_tabular once TCP is the binding you keep.
+  serviceName: ssas_tabular_tcp
+  serviceConnection:
+    config:
+      type: CustomDatabase
+      sourcePythonClass: ssas_om.source.SsasSource
+      connectionOptions:
+        transport: "tcp"
+        # A hostname, not a URL — the scheme and path of ${SSAS_HOST} are stripped,
+        # since this binding addresses a host and a port rather than an IIS app.
+        host: "${SSAS_HOST}"
+        # The instance's PINNED port, from its msmdsrv.ini. There is no default:
+        # the named-instance redirector on TCP 2382 has no public specification and
+        # is not used, and a guessed port presents as a hang, not as an error.
+        port: "${SSAS_TCP_PORT}"
+        # ntlm is the only mechanism exercised end to end on this binding. kerberos
+        # and negotiate are accepted and authenticate from the ambient ticket cache
+        # (drop user/password, set servicePrincipalClass if the SPN is not
+        # MSOLAPSvc.3/<host>), but a padding mechanism cannot be carried by the
+        # frame layout, so the library refuses it rather than sending a corrupt
+        # body — expect a ProtocolError naming padding, not a silent failure.
+        authMechanism: "ntlm"
+        # Block scalars, not quotes, and for a reason that bites here specifically:
+        # NTLM wants DOMAIN\user, and a backslash inside a DOUBLE-quoted YAML
+        # scalar is an escape sequence -- "DOMAIN\user" fails to parse before the
+        # connector ever sees it -- while an apostrophe inside a SINGLE-quoted one
+        # ends the scalar early, which a password may well contain. A literal
+        # block scalar has no escapes and no terminator, so both survive verbatim.
+        user: |-
+          ${SSAS_USER}
+        password: |-
+          ${SSAS_PASSWORD}
+        catalog: "AWTabular"
+        # No `endpoint`: there is no IIS application to address on this transport.
+        # Sample rows via DAX EVALUATE TOPN, exactly as over HTTP — the binding is a
+        # transport choice, not a modelling one.
+        includeSampleData: "true"
+        sampleDataRowCount: "50"
+        # Lineage works identically here; uncomment to link to the SQL source
+        # ingested by config/ingestion-mssql.yaml.tmpl.
+        # lineageService: "hetzner_mssql"
+        # lineageDatabase: "AdventureWorksDW2022"
+        # lineageSchema: "dbo"
+  sourceConfig:
+    config:
+      type: DatabaseMetadata
+sink:
+  type: metadata-rest
+  config: {}
+workflowConfig:
+  openMetadataServerConfig:
+    hostPort: "http://openmetadata-server:8585/api"
+    authProvider: openmetadata
+    securityConfig:
+      jwtToken: "${OM_JWT_TOKEN}"

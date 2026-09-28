@@ -1,0 +1,16 @@
+# Ingestion runtime for transport: tcp — the stock image plus the one dependency
+# the native binding needs. Everything else about the dev loop is unchanged: the
+# connector itself still arrives as a bind-mount on PYTHONPATH, so connector edits
+# need no rebuild; only a change of the library pin does.
+FROM docker.getcollate.io/openmetadata/ingestion:2.0.1.0
+
+USER root
+# `python -m pip`, not `pip`: the image's pip is a wrapper that refuses to run as
+# root, and installing as airflow would write into a directory it does not own.
+# ssas-xmla-tcp is not on PyPI, hence the git URL; pin it to a tag for anything
+# reproducible. It pulls exactly one dependency of its own (pyspnego).
+RUN python -m pip install --no-cache-dir \
+      "ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@main"
+
+# Back to the image's own user — the ingestion runtime expects to be airflow.
+USER airflow
