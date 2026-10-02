@@ -32,10 +32,16 @@ FROM ${BASE_IMAGE}
 USER root
 # `python -m pip`, not `pip`: the image's pip is a wrapper that refuses to run as
 # root, and installing as airflow would write into a directory it does not own.
-# ssas-xmla-tcp is not on PyPI, hence the git URL; pin it to a tag for anything
-# reproducible. It pulls exactly one dependency of its own (pyspnego).
+# ssas-xmla-tcp is not on PyPI, hence the git URL. The ref is an ARG pinned to a
+# TAG, not a branch: an image built from @main is not reproducible, so the same
+# build command two weeks apart could install different libraries without saying
+# so -- which is what the pinning discipline elsewhere in this repo exists to
+# prevent. Keep it in step with the [tcp] extra in pyproject.toml, and pass
+# --build-arg SSAS_XMLA_REF=main only to test a fix that is not released yet.
+# It pulls exactly one dependency of its own (pyspnego).
+ARG SSAS_XMLA_REF=v0.1.1
 RUN python -m pip install --no-cache-dir \
-      "ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@main"
+      "ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@${SSAS_XMLA_REF}"
 
 # Back to the image's own user — the ingestion runtime expects to be airflow.
 USER airflow
