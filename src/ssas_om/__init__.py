@@ -4,4 +4,4 @@ Tabular models are read via DISCOVER_CSDL_METADATA ([MS-CSDLBI]); multidimension
 models via MDSCHEMA ([MS-SSAS]). No admin-gated (TMSCHEMA) request is ever issued.
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"

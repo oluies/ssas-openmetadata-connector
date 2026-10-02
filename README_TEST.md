@@ -124,11 +124,14 @@ OpenMetadata anywhere in the picture:
 ```bash
 export SSAS_PASSWORD='...'          # from the environment, never argv
 uv run --no-project \
-  --with "ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@main" \
+  --with "ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@v0.1.1" \
   python -m ssas_xmla.probe \
     --host ssas-host.domain.com --port 2383 \
     --mechanism ntlm --principal 'DOMAIN\user'
 ```
+
+Pinned to a tag so the command is reproducible; swap `@v0.1.1` for `@main` only when you
+need a fix that is not released yet.
 
 `--mechanism ntlm` is not decoration: the default is `kerberos`, and a padding mechanism
 cannot be carried by that frame layout, so the library refuses it rather than sending a
