@@ -138,6 +138,20 @@ class XmlaClient:
         """SELECT * FROM $SYSTEM.<rowset> — the reader-accessible metadata path."""
         return self.execute(f"SELECT * FROM $SYSTEM.{rowset}", catalog=catalog)
 
+    def metadata_document(
+        self, request_type: str, catalog: str | None = None, restrictions: str = ""
+    ) -> XmlaResult:
+        """A Discover whose payload is a DOCUMENT rather than a row of scalars.
+
+        Over HTTP this is `discover` by another name: the response text already
+        carries the document, nested inside <METADATA>. It exists so the tabular
+        path can ask either transport for a document and be given one — the TCP
+        adapter receives parsed rows, and rendering a document back through a
+        rowset renderer escaped it, so the consumer's XML parser saw text where it
+        expected elements and built a model with no tables at all.
+        """
+        return self.discover(request_type, catalog=catalog, restrictions=restrictions)
+
     # -- internals ------------------------------------------------------------------
     def _call(self, body: str, action: str) -> XmlaResult:
         status, text = self._transport(self._url, body, action)

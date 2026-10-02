@@ -114,6 +114,23 @@ class TcpXmlaClient:
             )
         )
 
+    def metadata_document(
+        self, request_type: str, catalog: str | None = None, restrictions: str = ""
+    ) -> XmlaResult:
+        """A Discover whose payload is a DOCUMENT rather than a row of scalars.
+
+        DISCOVER_CSDL_METADATA returns the model's CSDL inside <METADATA>, so the
+        library hands it over as one cell holding a whole document. Rendering that
+        back through `_as_rowset_xml` escaped it, and `parse_csdl` then found text
+        where it looks for elements: the tabular path over this transport produced
+        a database, a schema and zero tables, with no warning and a reported 100%
+        success. The document is returned as-is instead.
+        """
+        return self._run(
+            lambda s: s.discover(request_type, _restrictions_to_mapping(restrictions), catalog),
+            render=_as_document,
+        )
+
     def execute(self, statement: str, catalog: str | None = None) -> XmlaResult:
         return self._run(lambda s: s.execute(statement, catalog))
 
@@ -124,7 +141,7 @@ class TcpXmlaClient:
         self._session.close()
 
     # -- internals --------------------------------------------------------------
-    def _run(self, call) -> XmlaResult:
+    def _run(self, call, render=None) -> XmlaResult:
         """Map the library's typed errors back onto XmlaResult.
 
         The Source reads `.ok` and `.fault`, so a refusal has to arrive as a fault
@@ -152,7 +169,31 @@ class TcpXmlaClient:
             return XmlaResult(status=200, text="", fault=self._scrub(str(exc))[:300])
         except SsasError as exc:
             return XmlaResult(status=500, text="", fault=self._scrub(str(exc))[:300])
-        return XmlaResult(status=200, text=_as_rowset_xml(rows), fault=None)
+        return XmlaResult(status=200, text=(render or _as_rowset_xml)(rows), fault=None)
+
+
+# The column a metadata rowset carries its document in ([MS-CSDLBI] CSDL and ASSL
+# both arrive this way). Named rather than guessed, so a rowset that happens to
+# have one column cannot be mistaken for a document.
+_DOCUMENT_COLUMN = "METADATA"
+
+
+def _as_document(rows) -> str:
+    """The document a metadata rowset carries, verbatim and unescaped.
+
+    Prefers the named column and falls back to the first non-empty cell, because a
+    server that renames it should degrade to "the one value there is" rather than
+    to silence — silence is what this whole path did before.
+    """
+    for row in rows:
+        value = row.get(_DOCUMENT_COLUMN)
+        if value:
+            return value
+    for row in rows:
+        for value in row.values():
+            if value:
+                return value
+    return ""
 
 
 def _as_rowset_xml(rows) -> str:

@@ -3,6 +3,7 @@
 Runs without the [tcp] extra installed: the adapter is exercised through a fake
 session, so these stay in the SDK-free offline suite.
 """
+
 import pytest
 
 from ssas_om.client import XmlaResult
@@ -118,6 +119,7 @@ def test_dmv_builds_the_system_rowset_query():
 # they are not interchangeable. These run without the [tcp] extra because
 # resolve_mechanism is checked before the optional import.
 
+
 def test_basic_is_rejected_rather_than_coerced_to_a_ticket_login():
     """The earlier version mapped basic -> kerberos, which discarded the supplied
     password and authenticated as whoever held a ticket. A silently different
@@ -160,3 +162,84 @@ def test_mechanism_is_case_insensitive_and_defaults_to_kerberos():
     assert resolve_mechanism("NTLM", "pw") == "ntlm"
     assert resolve_mechanism(None, "") == "kerberos"
     assert resolve_mechanism("", "") == "kerberos"
+
+
+def _stub_library(monkeypatch):
+    """Install a stand-in `ssas_xmla` carrying only the error classes `_run` imports.
+
+    The adapter's typed-error mapping is the only thing it needs the library for on
+    this path, and `importorskip` would make these tests SKIP in CI, where the [tcp]
+    extra is not installed — so the one test that catches a lost CSDL document would
+    never run anywhere it matters.
+    """
+    import sys
+    import types
+
+    stub = types.ModuleType("ssas_xmla")
+    for name in (
+        "AuthorizationError",
+        "AuthenticationError",
+        "ConnectionError",
+        "ServerError",
+        "SsasError",
+    ):
+        setattr(stub, name, type(name, (Exception,), {}))
+    monkeypatch.setitem(sys.modules, "ssas_xmla", stub)
+    return stub
+
+
+def _csdl_cell(fixture_xml) -> str:
+    """The METADATA cell exactly as the library hands it over: the document's
+    elements, serialised. Taken from the recorded HTTP response, so the shape is a
+    real server's and not this test's idea of one."""
+    import xml.etree.ElementTree as ET
+
+    raw = fixture_xml("tab", "discover.DISCOVER_CSDL_METADATA")
+    root = ET.fromstring(raw)
+    cell = next(el for el in root.iter() if el.tag.rsplit("}", 1)[-1] == "METADATA")
+    return "".join(ET.tostring(child, encoding="unicode") for child in cell)
+
+
+def test_a_csdl_document_survives_the_adapter_and_parses_to_tables(fixture_xml, monkeypatch):
+    """The test that was missing. `test_client.py` asserted "EntityType" in r.text
+    for the HTTP client only, so nothing covered the TCP path — which rendered the
+    document back through the rowset renderer, escaped it, and produced a model
+    with no tables at all while reporting success."""
+    from ssas_om.csdl import parse_csdl
+
+    _stub_library(monkeypatch)
+    adapter = _adapter_with(_FakeSession(rows=[{"METADATA": _csdl_cell(fixture_xml)}]))
+    r = adapter.metadata_document(
+        "DISCOVER_CSDL_METADATA",
+        catalog="AWTabular",
+        restrictions="<CATALOG_NAME>AWTabular</CATALOG_NAME>",
+    )
+    assert r.ok
+    assert "EntityType" in r.text
+    assert "&lt;EntityType" not in r.text, "the document was escaped, so it is now text"
+    assert len(parse_csdl(r.text).tables) == 2
+
+
+def test_the_document_column_is_named_not_guessed():
+    """A rowset that happens to have one column must not be mistaken for a document,
+    so the named column wins; the fallback exists only so a renamed column degrades
+    to "the one value there is" rather than to silence."""
+    from ssas_om.tcp_client import _as_document
+
+    assert _as_document([{"CATALOG_NAME": "AWTabular", "METADATA": "<Schema/>"}]) == "<Schema/>"
+    assert _as_document([{"SOMETHING_ELSE": "<Schema/>"}]) == "<Schema/>"
+    assert _as_document([{"METADATA": ""}]) == ""
+    assert _as_document([]) == ""
+
+
+def test_a_refused_document_request_is_a_fault_not_an_empty_document(monkeypatch):
+    """Otherwise "the server said no" and "the model is empty" are the same value,
+    which is the confusion this whole path was built on."""
+    errors = _stub_library(monkeypatch)
+
+    adapter = _adapter_with(_FakeSession(error=errors.AuthorizationError("needs admin")))
+    r = adapter.metadata_document("DISCOVER_CSDL_METADATA", catalog="AWTabular")
+    assert not r.ok
+    assert r.status == 403
+    assert r.fault and "admin" in r.fault
+    assert r.text == ""
