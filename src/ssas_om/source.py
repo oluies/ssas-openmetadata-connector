@@ -274,16 +274,36 @@ class SsasSource(Source):
             self._emit_sample_data(plan, cat)
 
     def _plan_tabular_catalog(self, cat: Catalog) -> ServicePlan | None:
-        r = self.client.discover(
+        # metadata_document, not discover: CSDL arrives as a document inside a cell,
+        # and the TCP adapter used to re-render it through a rowset renderer, which
+        # escaped it -- parse_csdl then saw text where it looks for elements.
+        r = self.client.metadata_document(
             "DISCOVER_CSDL_METADATA",
             catalog=cat.name,
             restrictions=f"<CATALOG_NAME>{escape(cat.name)}</CATALOG_NAME>",
         )
         if not r.ok:
+            # Returning None silently was how a refused request became an empty but
+            # green run. The fault is already scrubbed by the client.
+            logger.warning(
+                "no CSDL for catalog %s: the request was refused (%s)", cat.name, r.fault
+            )
             return None
         # relationships are parsed but lineage emission is name-based (see _emit_lineage)
         plan, _rels = plan_tabular(model=parse_csdl(r.text),
                                    service=self.service_name, database=cat.name)
+        if not any(sch.tables for sch in plan.schemas):
+            # A catalog that yields a database, a schema and nothing else is the
+            # shape of a bug, not of success: the CSDL parsed to no tables. Say so,
+            # with the size of what was parsed, rather than emitting two entities
+            # and reporting 100%.
+            logger.warning(
+                "catalog %s produced no tables: %d characters of CSDL parsed to zero "
+                "EntityType elements. Either the account cannot see the model's "
+                "tables, or the document is not the shape the parser expects.",
+                cat.name,
+                len(r.text),
+            )
         return plan
 
     def _plan_cube_catalog(self, cat: Catalog) -> ServicePlan | None:
