@@ -4,6 +4,10 @@ Presents exactly the `XmlaClient` interface — `discover`, `execute`, `dmv`, ea
 returning an `XmlaResult` — so every parser, mapper and the Source itself are
 unchanged. The binding is a transport choice, not a modelling one.
 
+The surface both clients must implement is `discover`, `execute`, `dmv` and
+`metadata_document` — the last for a Discover whose payload is a document rather
+than a row of scalars, which the Source calls unconditionally.
+
 Requires the `[tcp]` extra, which pulls in `ssas-xmla-tcp`. That library is
 deliberately a separate package: it is a general protocol implementation with one
 dependency (`pyspnego`), and pulling the OpenMetadata SDK into it would make it
@@ -184,15 +188,24 @@ def _as_document(rows) -> str:
     Prefers the named column and falls back to the first non-empty cell, because a
     server that renames it should degrade to "the one value there is" rather than
     to silence — silence is what this whole path did before.
+
+    `rows` is materialised first: the two passes read it twice, which `_as_rowset_xml`
+    never required, so a library returning a one-shot iterator would have had the
+    first pass consume it and the fallback find nothing — returning the very silence
+    the fallback exists to prevent. (The library returns a materialised Rowset today;
+    this does not depend on that staying true.) `str()` for the same reason: cell
+    values are strings today, and a non-string reaching XmlaResult.text would raise
+    TypeError out of ET.fromstring, which csdl.py does not catch.
     """
-    for row in rows:
+    materialised = list(rows)
+    for row in materialised:
         value = row.get(_DOCUMENT_COLUMN)
         if value:
-            return value
-    for row in rows:
+            return str(value)
+    for row in materialised:
         for value in row.values():
             if value:
-                return value
+                return str(value)
     return ""
 
 

@@ -294,15 +294,20 @@ class SsasSource(Source):
                                    service=self.service_name, database=cat.name)
         if not any(sch.tables for sch in plan.schemas):
             # A catalog that yields a database, a schema and nothing else is the
-            # shape of a bug, not of success: the CSDL parsed to no tables. Say so,
-            # with the size of what was parsed, rather than emitting two entities
-            # and reporting 100%.
+            # shape of a bug, not of success. The report names the two causes and
+            # the one signal that separates them: whether the response mentions
+            # EntityType at all. The response LENGTH does not separate them -- over
+            # HTTP r.text is the whole SOAP envelope, several thousand characters of
+            # xsd:schema and ddl namespaces even when the METADATA cell is empty, so
+            # a size alone reads as "there is plenty here" either way.
             logger.warning(
-                "catalog %s produced no tables: %d characters of CSDL parsed to zero "
-                "EntityType elements. Either the account cannot see the model's "
-                "tables, or the document is not the shape the parser expects.",
+                "catalog %s produced no tables: the response is %d characters and "
+                "mentions EntityType %d time(s). None means the account cannot see "
+                "the model's tables; some means the document is not the shape the "
+                "parser expects.",
                 cat.name,
                 len(r.text),
+                r.text.count("EntityType"),
             )
         return plan
 

@@ -3,6 +3,7 @@
 Requires the OpenMetadata SDK (source.py imports it); skipped where it is absent,
 so the SDK-free offline suite is unaffected.
 """
+
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -28,7 +29,7 @@ def _fixture_transport(url, body, action):
     return 500, "<Fault><faultstring>no fixture</faultstring></Fault>"
 
 
-def _make_source():
+def _make_source(include_sample_data=True):
     config = {
         "type": "customDatabase",
         "serviceName": "ssas_tabular",
@@ -42,14 +43,16 @@ def _make_source():
                     "user": "reader",
                     "password": "pw",
                     "catalog": "AWTabular",
+                    "includeSampleData": "true" if include_sample_data else "false",
                 },
             }
         },
         "sourceConfig": {"config": {"type": "DatabaseMetadata"}},
     }
     src = SsasSource.create(config, MagicMock())
-    src.client = XmlaClient("http://ssas.internal/olap-tab/msmdpump.dll",
-                            "reader", "pw", transport=_fixture_transport)
+    src.client = XmlaClient(
+        "http://ssas.internal/olap-tab/msmdpump.dll", "reader", "pw", transport=_fixture_transport
+    )
     return src
 
 
@@ -76,10 +79,11 @@ def test_test_connection_raises_on_fault():
     src = _make_source()
 
     def bad(url, body, action):
-        return 401, '<soap:Fault><faultstring>Not Authorized</faultstring></soap:Fault>'
+        return 401, "<soap:Fault><faultstring>Not Authorized</faultstring></soap:Fault>"
 
-    src.client = XmlaClient("http://ssas.internal/olap-tab/msmdpump.dll",
-                            "reader", "pw", transport=bad)
+    src.client = XmlaClient(
+        "http://ssas.internal/olap-tab/msmdpump.dll", "reader", "pw", transport=bad
+    )
     with pytest.raises(ConnectionError):
         src.test_connection()
 
@@ -89,6 +93,7 @@ def _md_transport(url, body, action):
     if "DBSCHEMA_CATALOGS" in body:
         return 200, (md / "discover.DBSCHEMA_CATALOGS.xml").read_text()
     import re
+
     m = re.search(r"\$SYSTEM\.([A-Z_]+)", body)
     if m:
         f = md / f"execute.{m.group(1)}.xml"
@@ -101,19 +106,25 @@ def test_iter_multidimensional_emits_database_from_cube():
     config = {
         "type": "customDatabase",
         "serviceName": "ssas_md",
-        "serviceConnection": {"config": {
-            "type": "CustomDatabase",
-            "sourcePythonClass": "ssas_om.source.SsasSource",
-            "connectionOptions": {
-                "host": "http://ssas.internal", "endpoint": "/olap-md/msmdpump.dll",
-                "user": "reader", "password": "pw", "catalog": "AWMultidim",
-            },
-        }},
+        "serviceConnection": {
+            "config": {
+                "type": "CustomDatabase",
+                "sourcePythonClass": "ssas_om.source.SsasSource",
+                "connectionOptions": {
+                    "host": "http://ssas.internal",
+                    "endpoint": "/olap-md/msmdpump.dll",
+                    "user": "reader",
+                    "password": "pw",
+                    "catalog": "AWMultidim",
+                },
+            }
+        },
         "sourceConfig": {"config": {"type": "DatabaseMetadata"}},
     }
     src = SsasSource.create(config, MagicMock())
-    src.client = XmlaClient("http://ssas.internal/olap-md/msmdpump.dll",
-                            "reader", "pw", transport=_md_transport)
+    src.client = XmlaClient(
+        "http://ssas.internal/olap-md/msmdpump.dll", "reader", "pw", transport=_md_transport
+    )
     entities = [e.right for e in src._iter() if e.right is not None]
     kinds = [type(e).__name__ for e in entities]
     assert kinds.count("CreateDatabaseServiceRequest") == 1
@@ -123,20 +134,26 @@ def test_iter_multidimensional_emits_database_from_cube():
 
 def test_iter_emits_lineage_edges_sql_to_ssas():
     import uuid
+
     config = {
         "type": "customDatabase",
         "serviceName": "ssas_tabular",
-        "serviceConnection": {"config": {
-            "type": "CustomDatabase",
-            "sourcePythonClass": "ssas_om.source.SsasSource",
-            "connectionOptions": {
-                "host": "http://ssas.internal", "endpoint": "/olap-tab/msmdpump.dll",
-                "user": "reader", "password": "pw", "catalog": "AWTabular",
-                "lineageService": "hetzner_mssql",
-                "lineageDatabase": "AdventureWorksDW2022",
-                "lineageSchema": "dbo",
-            },
-        }},
+        "serviceConnection": {
+            "config": {
+                "type": "CustomDatabase",
+                "sourcePythonClass": "ssas_om.source.SsasSource",
+                "connectionOptions": {
+                    "host": "http://ssas.internal",
+                    "endpoint": "/olap-tab/msmdpump.dll",
+                    "user": "reader",
+                    "password": "pw",
+                    "catalog": "AWTabular",
+                    "lineageService": "hetzner_mssql",
+                    "lineageDatabase": "AdventureWorksDW2022",
+                    "lineageSchema": "dbo",
+                },
+            }
+        },
         "sourceConfig": {"config": {"type": "DatabaseMetadata"}},
     }
     fqn_to_id: dict[str, uuid.UUID] = {}
@@ -149,11 +166,15 @@ def test_iter_emits_lineage_edges_sql_to_ssas():
     md = MagicMock()
     md.get_by_name.side_effect = get_by_name
     src = SsasSource.create(config, md)
-    src.client = XmlaClient("http://ssas.internal/olap-tab/msmdpump.dll",
-                            "reader", "pw", transport=_fixture_transport)
+    src.client = XmlaClient(
+        "http://ssas.internal/olap-tab/msmdpump.dll", "reader", "pw", transport=_fixture_transport
+    )
 
-    edges = [e.right for e in src._iter()
-             if e.right is not None and type(e.right).__name__ == "AddLineageRequest"]
+    edges = [
+        e.right
+        for e in src._iter()
+        if e.right is not None and type(e.right).__name__ == "AddLineageRequest"
+    ]
     assert len(edges) == 2  # DimProduct, FactInternetSales
 
     def uid(x):
@@ -191,8 +212,9 @@ def _sample_transport(url, body, action):
 
 def test_sample_data_ingested_with_decoded_columns():
     src = _make_source()
-    src.client = XmlaClient("http://ssas.internal/olap-tab/msmdpump.dll",
-                            "reader", "pw", transport=_sample_transport)
+    src.client = XmlaClient(
+        "http://ssas.internal/olap-tab/msmdpump.dll", "reader", "pw", transport=_sample_transport
+    )
     # drain the generator so the post-pass sample-data call runs
     list(src._iter())
 
@@ -209,20 +231,26 @@ def test_sample_data_can_be_disabled():
     config = {
         "type": "customDatabase",
         "serviceName": "ssas_tabular",
-        "serviceConnection": {"config": {
-            "type": "CustomDatabase",
-            "sourcePythonClass": "ssas_om.source.SsasSource",
-            "connectionOptions": {
-                "host": "http://ssas.internal", "endpoint": "/olap-tab/msmdpump.dll",
-                "user": "reader", "password": "pw", "catalog": "AWTabular",
-                "includeSampleData": "false",
-            },
-        }},
+        "serviceConnection": {
+            "config": {
+                "type": "CustomDatabase",
+                "sourcePythonClass": "ssas_om.source.SsasSource",
+                "connectionOptions": {
+                    "host": "http://ssas.internal",
+                    "endpoint": "/olap-tab/msmdpump.dll",
+                    "user": "reader",
+                    "password": "pw",
+                    "catalog": "AWTabular",
+                    "includeSampleData": "false",
+                },
+            }
+        },
         "sourceConfig": {"config": {"type": "DatabaseMetadata"}},
     }
     src = SsasSource.create(config, MagicMock())
-    src.client = XmlaClient("http://ssas.internal/olap-tab/msmdpump.dll",
-                            "reader", "pw", transport=_sample_transport)
+    src.client = XmlaClient(
+        "http://ssas.internal/olap-tab/msmdpump.dll", "reader", "pw", transport=_sample_transport
+    )
     list(src._iter())
     src.metadata.ingest_table_sample_data.assert_not_called()
 
@@ -231,6 +259,7 @@ def test_sample_data_can_be_disabled():
 # These exercise the change directly rather than _requests_auth, which ignored
 # user/password for kerberos both before and after -- so a test against it would
 # have passed on the pre-change tree and proved nothing.
+
 
 def _config(options: dict) -> dict:
     return {
@@ -264,9 +293,9 @@ def test_ticket_mechanisms_get_past_the_credential_check(mechanism):
     try:
         src = SsasSource.create(_config({**_BASE, "authMechanism": mechanism}), MagicMock())
     except RuntimeError as exc:
-        assert "extra" in str(exc)          # got past credentials to the dependency check
+        assert "extra" in str(exc)  # got past credentials to the dependency check
         assert "user" not in str(exc)
-    except KeyError as exc:                  # the pre-fix behaviour
+    except KeyError as exc:  # the pre-fix behaviour
         pytest.fail(f"still demands credentials for {mechanism}: {exc}")
     else:
         assert src.client is not None
@@ -288,9 +317,7 @@ def test_default_mechanism_is_basic_and_requires_credentials():
 
 def test_basic_auth_source_constructs_with_credentials():
     """The ordinary path still works -- the guard did not break it."""
-    src = SsasSource.create(
-        _config({**_BASE, "user": "reader", "password": "pw"}), MagicMock()
-    )
+    src = SsasSource.create(_config({**_BASE, "user": "reader", "password": "pw"}), MagicMock())
     assert src.client is not None
 
 
@@ -318,8 +345,7 @@ def test_tcp_rejects_basic_before_touching_the_network():
 
     with pytest.raises(ValueError, match="basic"):
         SsasSource.create(
-            _config({**_TCP_BASE, "authMechanism": "basic",
-                     "user": "reader", "password": "pw"}),
+            _config({**_TCP_BASE, "authMechanism": "basic", "user": "reader", "password": "pw"}),
             MagicMock(),
         )
 
@@ -328,9 +354,7 @@ def test_tcp_requires_a_pinned_port():
     """There is no default: guessing between a default instance's well-known port
     and a named instance's pinned one presents to the operator as a hang."""
     with pytest.raises(KeyError, match="port"):
-        SsasSource.create(
-            _config({"host": "ssas.internal", "transport": "tcp"}), MagicMock()
-        )
+        SsasSource.create(_config({"host": "ssas.internal", "transport": "tcp"}), MagicMock())
 
 
 def test_unknown_transport_is_rejected():
@@ -355,6 +379,7 @@ def test_http_still_demands_an_endpoint_and_says_which_option():
 # connectionOptions is dict[str, str] in the OpenMetadata schema with no password
 # format, so a literal password is stored unencrypted and returned by the API to
 # anyone who may view the service. A variable NAME is not a credential.
+
 
 def test_password_can_come_from_an_environment_variable(monkeypatch):
     monkeypatch.setenv("SSAS_PW_FOR_TEST", "from-the-runtime")
@@ -395,17 +420,16 @@ def test_setting_both_password_and_passwordEnvVar_is_refused(monkeypatch):
     monkeypatch.setenv("SSAS_PW_BOTH", "from-env")
     with pytest.raises(KeyError, match="both"):
         SsasSource.create(
-            _config({**_BASE, "user": "reader", "password": "literal",
-                     "passwordEnvVar": "SSAS_PW_BOTH"}),
+            _config(
+                {**_BASE, "user": "reader", "password": "literal", "passwordEnvVar": "SSAS_PW_BOTH"}
+            ),
             MagicMock(),
         )
 
 
 def test_a_literal_password_still_works(monkeypatch):
     """The existing path is unchanged; passwordEnvVar is additive."""
-    src = SsasSource.create(
-        _config({**_BASE, "user": "reader", "password": "pw"}), MagicMock()
-    )
+    src = SsasSource.create(_config({**_BASE, "user": "reader", "password": "pw"}), MagicMock())
     assert src.client is not None
 
 
@@ -415,3 +439,59 @@ def test_the_env_var_name_is_not_treated_as_the_password(monkeypatch):
 
     monkeypatch.setenv("SSAS_PW_NAMED", "the-real-secret")
     assert _password_from({"passwordEnvVar": "SSAS_PW_NAMED"}) == "the-real-secret"
+
+
+class _DocumentOnlyClient:
+    """A client that refuses to hand CSDL to `discover`.
+
+    Over HTTP `metadata_document` IS `discover` (client.py), so a test driven by
+    `XmlaClient` cannot tell the two apart: reverting the tabular path to
+    `discover` reintroduces the whole defect — a database, a schema, zero tables,
+    100% success — with every test still green. That was roborev 1861's finding,
+    and this double is what makes the distinction observable. Asking by the wrong
+    name is the bug, so asking by the wrong name is an error here.
+    """
+
+    def __init__(self, catalogs_xml: str, document: str):
+        self._catalogs_xml = catalogs_xml
+        self._document = document
+        self.asked_for = []
+
+    def discover(self, request_type, catalog=None, restrictions=""):
+        from ssas_om.client import XmlaResult
+
+        self.asked_for.append(("discover", request_type))
+        if request_type == "DISCOVER_CSDL_METADATA":
+            raise AssertionError(
+                "the tabular path asked `discover` for CSDL; it must ask "
+                "`metadata_document`, or the TCP transport loses the document"
+            )
+        return XmlaResult(status=200, text=self._catalogs_xml, fault=None)
+
+    def metadata_document(self, request_type, catalog=None, restrictions=""):
+        from ssas_om.client import XmlaResult
+
+        self.asked_for.append(("metadata_document", request_type))
+        return XmlaResult(status=200, text=self._document, fault=None)
+
+    def execute(self, statement, catalog=None):  # pragma: no cover - sampling is off
+        from ssas_om.client import XmlaResult
+
+        return XmlaResult(status=200, text="", fault=None)
+
+
+def test_the_tabular_path_asks_for_a_document_not_a_rowset():
+    """The source-side half of the TCP fix, which no test reached before: both
+    calls return something usable over HTTP, so only a double that distinguishes
+    them can pin which one the tabular path makes."""
+    client = _DocumentOnlyClient(
+        catalogs_xml=(FIX / "discover.DBSCHEMA_CATALOGS.xml").read_text(),
+        document=(FIX / "discover.DISCOVER_CSDL_METADATA.xml").read_text(),
+    )
+    src = _make_source(include_sample_data=False)
+    src.client = client
+
+    entities = [e.right for e in src._iter() if e.right is not None]
+    tables = {e.name.root for e in entities if type(e).__name__ == "CreateTableRequest"}
+    assert tables == {"DimProduct", "FactInternetSales"}
+    assert ("metadata_document", "DISCOVER_CSDL_METADATA") in client.asked_for

@@ -188,19 +188,30 @@ def _stub_library(monkeypatch):
     return stub
 
 
-def _csdl_cell(fixture_xml) -> str:
-    """The METADATA cell exactly as the library hands it over: the document's
-    elements, serialised. Taken from the recorded HTTP response, so the shape is a
-    real server's and not this test's idea of one."""
+def _csdl_cell(fixture_xml, whole_cell: bool = True) -> str:
+    """The METADATA cell as the library hands it over, taken from the recorded HTTP
+    response so the shape is a real server's and not this test's idea of one.
+
+    Both shapes are exercised, because both exist in the wild of our own versions:
+    ssas-xmla-tcp v0.1.1 serialises the cell's CHILDREN, and from the next release
+    it serialises the CELL (a cell with several children is otherwise a multi-root
+    fragment that does not parse). The adapter must not care which it is given, and
+    neither must `parse_csdl`.
+    """
     import xml.etree.ElementTree as ET
 
     raw = fixture_xml("tab", "discover.DISCOVER_CSDL_METADATA")
     root = ET.fromstring(raw)
     cell = next(el for el in root.iter() if el.tag.rsplit("}", 1)[-1] == "METADATA")
+    if whole_cell:
+        return ET.tostring(cell, encoding="unicode")
     return "".join(ET.tostring(child, encoding="unicode") for child in cell)
 
 
-def test_a_csdl_document_survives_the_adapter_and_parses_to_tables(fixture_xml, monkeypatch):
+@pytest.mark.parametrize("whole_cell", [True, False], ids=["cell", "children"])
+def test_a_csdl_document_survives_the_adapter_and_parses_to_tables(
+    fixture_xml, monkeypatch, whole_cell
+):
     """The test that was missing. `test_client.py` asserted "EntityType" in r.text
     for the HTTP client only, so nothing covered the TCP path — which rendered the
     document back through the rowset renderer, escaped it, and produced a model
@@ -208,7 +219,8 @@ def test_a_csdl_document_survives_the_adapter_and_parses_to_tables(fixture_xml, 
     from ssas_om.csdl import parse_csdl
 
     _stub_library(monkeypatch)
-    adapter = _adapter_with(_FakeSession(rows=[{"METADATA": _csdl_cell(fixture_xml)}]))
+    cell = _csdl_cell(fixture_xml, whole_cell=whole_cell)
+    adapter = _adapter_with(_FakeSession(rows=[{"METADATA": cell}]))
     r = adapter.metadata_document(
         "DISCOVER_CSDL_METADATA",
         catalog="AWTabular",
