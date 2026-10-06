@@ -39,7 +39,7 @@ USER root
 # prevent. Keep it in step with the [tcp] extra in pyproject.toml, and pass
 # --build-arg SSAS_XMLA_REF=main only to test a fix that is not released yet.
 # It pulls exactly one dependency of its own (pyspnego).
-ARG SSAS_XMLA_REF=v0.1.1
+ARG SSAS_XMLA_REF=v0.1.2
 RUN python -m pip install --no-cache-dir \
       "ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@${SSAS_XMLA_REF}"
 

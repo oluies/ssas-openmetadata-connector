@@ -193,10 +193,11 @@ def _csdl_cell(fixture_xml, whole_cell: bool = True) -> str:
     response so the shape is a real server's and not this test's idea of one.
 
     Both shapes are exercised, because both exist in the wild of our own versions:
-    ssas-xmla-tcp v0.1.1 serialises the cell's CHILDREN, and from the next release
-    it serialises the CELL (a cell with several children is otherwise a multi-root
+    ssas-xmla-tcp v0.1.1 serialises the cell's CHILDREN, and v0.1.2 onwards
+    serialises the CELL (a cell with several children is otherwise a multi-root
     fragment that does not parse). The adapter must not care which it is given, and
-    neither must `parse_csdl`.
+    neither must `parse_csdl`. The children shape stays exercised because the pin
+    is ours to move: an image still built against v0.1.1 hands over that shape.
     """
     import xml.etree.ElementTree as ET
 

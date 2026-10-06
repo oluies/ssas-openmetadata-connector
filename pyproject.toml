@@ -51,7 +51,7 @@ kerberos = ["requests-kerberos>=0.14"]
 # also requesting [tcp] gives pip two direct URLs for one distribution, which
 # is ResolutionImpossible -- and it only fails once the two refs diverge, i.e.
 # the moment the pin starts doing its job.
-tcp = ["ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@v0.1.1"]
+tcp = ["ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@v0.1.2"]
 ntlm = ["requests-ntlm>=1.2"]
 dev = [
   "pytest>=8",
