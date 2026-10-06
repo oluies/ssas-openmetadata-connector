@@ -90,7 +90,7 @@ jobs:
       - name: the [tcp] extra's target actually installs
         run: |
           uv pip install --python .pkgcheck --no-deps --dry-run \
-            "ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@v0.1.0"
+            "ssas-xmla-tcp @ git+https://github.com/oluies/ssas-xmla-tcp@v0.1.2"
 
   test-offline:
     name: offline unit tests (py ${{ matrix.python-version }})
