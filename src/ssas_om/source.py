@@ -337,12 +337,14 @@ class SsasSource(Source):
             )
             return None
         # relationships are parsed but lineage emission is name-based (see _emit_lineage)
+        definitions = self._measure_definitions(cat.name)
         plan, _rels = plan_tabular(
             model=parse_csdl(r.text),
             service=self.service_name,
             database=cat.name,
-            measure_definitions=self._measure_definitions(cat.name),
+            measure_definitions=definitions,
         )
+        self._report_unmatched_measures(cat.name, plan, definitions)
         if not any(sch.tables for sch in plan.schemas):
             # A catalog that yields a database, a schema and nothing else is the
             # shape of a bug, not of success. The report names the two causes and
@@ -361,6 +363,37 @@ class SsasSource(Source):
                 r.text.count("EntityType"),
             )
         return plan
+
+    @staticmethod
+    def _report_unmatched_measures(
+        catalog: str, plan: ServicePlan, definitions: dict[str, MeasureDefinition]
+    ) -> None:
+        """Say so when the server gave definitions and none of them landed.
+
+        Both halves succeed independently here: MDSCHEMA answers, CSDL parses, and
+        every measure still ends up described as the bare word "measure" -- which
+        is also what a model with no documentation looks like. Naming both key
+        sets turns the next run's log into the diagnostic instead of a question.
+        """
+        measures = [
+            column
+            for schema in plan.schemas
+            for table in schema.tables
+            for column in table.columns
+            if column.is_measure
+        ]
+        if not definitions or not measures:
+            return
+        if any(column.description != "measure" for column in measures):
+            return
+        logger.warning(
+            "measure definitions were fetched for %s but none matched: the server "
+            "names them %s, the model's measure columns are %s. A CSDL carrying no "
+            "bi:Measure ReferenceName is the usual cause.",
+            catalog,
+            sorted(definitions)[:10],
+            sorted(column.name for column in measures)[:10],
+        )
 
     def _measure_definitions(self, catalog: str) -> dict[str, MeasureDefinition]:
         """Measure descriptions and formulas, or nothing. Never fatal.

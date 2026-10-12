@@ -623,3 +623,59 @@ def test_the_banner_survives_a_missing_transport_library():
     from ssas_om.source import _transport_library_version
 
     assert _transport_library_version()  # a version, or "not installed" — never a raise
+
+
+_UNMATCHABLE_MEASURES = (
+    '<return><root xmlns="urn:schemas-microsoft-com:xml-analysis:rowset">'
+    "<row><MEASURE_NAME>Something Else Entirely</MEASURE_NAME>"
+    "<DESCRIPTION>a definition for a measure this model does not have</DESCRIPTION>"
+    "</row></root></return>"
+)
+
+
+def _transport_with_unmatchable_measures(url, body, action):
+    if "$SYSTEM.MDSCHEMA_MEASURES" in body:
+        return 200, _UNMATCHABLE_MEASURES
+    return _fixture_transport(url, body, action)
+
+
+def test_definitions_that_match_nothing_are_reported(caplog):
+    """Both halves succeed and every measure still reads "measure" — which is also
+    what an undocumented model looks like. The log names both key sets so the next
+    run is the diagnostic rather than the question."""
+    import logging
+
+    src = _make_source(include_sample_data=False)
+    src.client = XmlaClient(
+        "http://ssas.internal/olap-tab/msmdpump.dll",
+        "reader",
+        "pw",
+        transport=_transport_with_unmatchable_measures,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        list(src._iter())
+
+    unmatched = [r for r in caplog.records if "none matched" in r.getMessage()]
+    assert len(unmatched) == 1
+    message = unmatched[0].getMessage()
+    assert "Something Else Entirely" in message  # what the server calls them
+    assert "Total_Sales" in message  # what the model calls them
+
+
+def test_a_successful_match_says_nothing(caplog):
+    """The warning must not fire on the healthy path, or it stops meaning anything."""
+    import logging
+
+    src = _make_source(include_sample_data=False)
+    src.client = XmlaClient(
+        "http://ssas.internal/olap-tab/msmdpump.dll",
+        "reader",
+        "pw",
+        transport=_transport_with_measures,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        list(src._iter())
+
+    assert not [r for r in caplog.records if "none matched" in r.getMessage()]

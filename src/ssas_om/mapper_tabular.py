@@ -6,11 +6,45 @@ through for table-level lineage inside the model.
 """
 from __future__ import annotations
 
+import re
+
 from . import csdl
 from .mdschema import MeasureDefinition
 from .plan import ColumnPlan, RelationshipPlan, SchemaPlan, ServicePlan, TablePlan
 
 SCHEMA_NAME = "Model"  # a tabular model exposes a single cube named "Model"
+
+
+def _canonical(name: str) -> str:
+    """A measure name with the identifier-safe spelling flattened out.
+
+    MDSCHEMA returns the modeller's name ("Total Quantity"); CSDL's EDM property
+    is identifier-safe ("Total_Quantity"). The BI annotation normally carries the
+    first as ReferenceName, which is the join this code prefers -- but a model
+    whose CSDL omits that annotation would match nothing at all, and the symptom
+    is a description that reads "measure", indistinguishable from a server that
+    reported no definition. Underscores and runs of whitespace collapse to one
+    space, and case is folded.
+    """
+    return re.sub(r"[\s_]+", " ", name).strip().casefold()
+
+
+def _find_definition(
+    column: csdl.Column, definitions: dict[str, MeasureDefinition]
+) -> MeasureDefinition | None:
+    """The definition for one measure column, by the most exact key that matches.
+
+    Reference name, then column name, then the canonical form -- and the last only
+    when exactly ONE definition canonicalises to it. A model holding both
+    "Gross Margin" and "Gross_Margin" would otherwise have them silently swapped,
+    which is worse than the missing description this fallback exists to prevent.
+    """
+    for key in (column.reference_name, column.name):
+        if key and key in definitions:
+            return definitions[key]
+    wanted = _canonical(column.reference_name or column.name)
+    matches = [d for name, d in definitions.items() if _canonical(name) == wanted]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _measure_description(
@@ -26,11 +60,12 @@ def _measure_description(
 
     The join is on the measure's REFERENCE name, not the column name: CSDL makes
     the EDM property identifier-safe, so "Total Sales" arrives as "Total_Sales"
-    and joining on it matches nothing at all.
+    and joining on that matches nothing at all. Where the annotation is missing,
+    `_find_definition` falls back to the canonical spelling.
     """
     if not column.is_measure:
         return None
-    definition = definitions.get(column.reference_name or column.name)
+    definition = _find_definition(column, definitions)
     if definition is None:
         return "measure"
     parts = [definition.description.strip()] if definition.description.strip() else []
