@@ -479,6 +479,15 @@ class _DocumentOnlyClient:
 
         return XmlaResult(status=200, text="", fault=None)
 
+    def dmv(self, rowset, catalog=None):
+        """Part of the surface too — the measure-definition fetch calls it. A
+        double that stops short of the contract fails as an AttributeError in the
+        middle of ingestion, which is how this one announced itself."""
+        from ssas_om.client import XmlaResult
+
+        self.asked_for.append(("dmv", rowset))
+        return XmlaResult(status=500, text="", fault="no definitions here")
+
 
 def test_the_tabular_path_asks_for_a_document_not_a_rowset():
     """The source-side half of the TCP fix, which no test reached before: both
@@ -495,3 +504,56 @@ def test_the_tabular_path_asks_for_a_document_not_a_rowset():
     tables = {e.name.root for e in entities if type(e).__name__ == "CreateTableRequest"}
     assert tables == {"DimProduct", "FactInternetSales"}
     assert ("metadata_document", "DISCOVER_CSDL_METADATA") in client.asked_for
+
+
+_MEASURES_ROWSET = (
+    '<return><root xmlns="urn:schemas-microsoft-com:xml-analysis:rowset">'
+    "<row><CUBE_NAME>Model</CUBE_NAME><MEASURE_NAME>Total Sales</MEASURE_NAME>"
+    "<DESCRIPTION>Business definition:\n"
+    "Value of goods invoiced in the period.\n"
+    "Technical definition:\n"
+    "SUM(FactInternetSales[SalesAmount])</DESCRIPTION>"
+    "<MEASURE_IS_VISIBLE>true</MEASURE_IS_VISIBLE></row>"
+    "</root></return>"
+)
+
+
+def _transport_with_measures(url, body, action):
+    """The fixture transport plus MDSCHEMA_MEASURES, which the default one answers
+    with a fault — so the existing tests keep covering the no-definitions path."""
+    if "$SYSTEM.MDSCHEMA_MEASURES" in body:
+        return 200, _MEASURES_ROWSET
+    return _fixture_transport(url, body, action)
+
+
+def test_a_measures_description_comes_from_mdschema():
+    """Reader-accessible enrichment: the formula the modeller wrote reaches the
+    column description instead of the bare word "measure". Wired here, because the
+    mapper test cannot prove the Source asks for it."""
+    src = _make_source(include_sample_data=False)
+    src.client = XmlaClient(
+        "http://ssas.internal/olap-tab/msmdpump.dll",
+        "reader",
+        "pw",
+        transport=_transport_with_measures,
+    )
+
+    tables = {
+        e.right.name.root: e.right
+        for e in src._iter()
+        if e.right is not None and type(e.right).__name__ == "CreateTableRequest"
+    }
+    measures = [c for c in tables["FactInternetSales"].columns if c.name.root == "Total_Sales"]
+    assert measures, "the measure column is missing"
+    description = measures[0].description.root
+    assert "Value of goods invoiced" in description
+    assert "SUM(FactInternetSales[SalesAmount])" in description
+
+
+def test_a_refused_measures_request_leaves_the_tables_alone():
+    """The enrichment must not cost the caller its metadata: the default fixture
+    transport faults on MDSCHEMA_MEASURES, and ingestion still emits every table."""
+    src = _make_source(include_sample_data=False)
+    entities = [e.right for e in src._iter() if e.right is not None]
+    tables = {e.name.root for e in entities if type(e).__name__ == "CreateTableRequest"}
+    assert tables == {"DimProduct", "FactInternetSales"}

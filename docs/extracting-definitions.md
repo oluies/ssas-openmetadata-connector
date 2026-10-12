@@ -47,13 +47,25 @@ SELECT [MEASURE_NAME], [EXPRESSION], [MEASURE_IS_VISIBLE]
 FROM $SYSTEM.MDSCHEMA_MEASURES
 ```
 
-For a tabular model, the same rowset works, and `DISCOVER_CSDL_METADATA` also returns measure
-definitions inline with the model — which is what the connector already fetches, so nothing new
-is being asked of the server.
+For a tabular model, the same rowset works — and it is what the connector now reads, per
+catalog, to fill in each measure's description.
+
+**`DISCOVER_CSDL_METADATA` does not carry definitions**, which this page claimed until
+2026-10-12. Checked against the recorded response in `tests/fixtures/xmla/tab`: a measure
+appears as `<bi:Measure Caption="Total Sales" ReferenceName="Total Sales"/>`, and the document
+contains no `Expression` or `Formula` anywhere. The BI annotations are presentation metadata —
+caption, reference name, hidden, contents. So MDSCHEMA_MEASURES is not a convenience here, it
+is the only reader-accessible route.
 
 `EXPRESSION` is empty for a plain aggregate over a column (the aggregation is structural, not a
 formula) and populated for calculated measures. Both cases are interesting: the first is the
 easy path the extractor must get right, the second is where it will struggle.
+
+`DESCRIPTION` matters as much, and in practice more: it is free text the modeller authored, and
+a live instance was found carrying the formula there by hand — "Business definition: … /
+Technical definition: `SUM(Fact[Amount])`" — on measures whose `EXPRESSION` was empty because
+they are plain aggregates. An extractor reading only `EXPRESSION` would have called that model
+undocumented.
 
 **Avoid `$SYSTEM.TMSCHEMA_MEASURES`.** It carries the same information but is admin-gated, and
 this connector deliberately holds only a reader account. If you have admin rights it will work,

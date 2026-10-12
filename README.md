@@ -244,6 +244,14 @@ from the ambient ticket cache and ignore both. Supplying them anyway is harmless
 | `includeSampleData` | boolean | no | `"true"` | Sample a few rows per tabular table for the UI's sample-data tab. Set `"false"` where reading rows is unwelcome — the connector then issues no `EVALUATE` at all. |
 | `sampleDataRowCount` | integer | no | `"50"` | Maximum rows sampled per table. Ignored when `includeSampleData` is false. |
 
+Each **measure** column carries its definition as the column description, read from
+`MDSCHEMA_MEASURES` — the modeller's own `DESCRIPTION` text, plus the server's `EXPRESSION`
+under its own label when the measure is calculated. That rowset is reader-accessible, so this
+needs no permission the connector does not already have; `DISCOVER_CSDL_METADATA` carries
+captions but no formula, and `TMSCHEMA_MEASURES`, which does, is admin-gated and stays
+unused. A measure with no definition keeps the bare description `measure`, and a server that
+refuses the request costs the run its descriptions, never its tables.
+
 ### Lineage to the SQL source
 
 All three are optional; set them to link ingested tables to a SQL Server source ingested
