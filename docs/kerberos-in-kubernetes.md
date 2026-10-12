@@ -160,10 +160,11 @@ resolves to no realm. The port and instance forms are therefore **opt-in**
 (`use_port=True`, `instance=`, or a full `spn=`), and `python -m ssas_xmla.probe` exposes all
 three plus prints which SPN it requested when authentication fails.
 
-**Kerberos has never been exercised against a real KDC.** The framing is mechanism-agnostic per
-the ADOMD decompile, and the code fails closed on a padding mechanism rather than corrupting
-the request, but the test fixture is a standalone workgroup machine whose SSAS speaks NTLM
-only. The first genuine Kerberos test will be against production. Budget for that being where
+**Kerberos has never been exercised against a real KDC.** The transport's framing is
+mechanism-agnostic — the same header and field order for Negotiate, Kerberos and NTLM, as its
+discovery brief records — and the code fails closed on a padding mechanism rather than
+corrupting the request, but the test fixture is a standalone workgroup machine whose SSAS
+speaks NTLM only. The first genuine Kerberos test will be against production. Budget for that being where
 the SPN and realm problems surface.
 
 ## Suggested order
