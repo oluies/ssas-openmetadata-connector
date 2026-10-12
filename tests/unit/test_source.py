@@ -557,3 +557,25 @@ def test_a_refused_measures_request_leaves_the_tables_alone():
     entities = [e.right for e in src._iter() if e.right is not None]
     tables = {e.name.root for e in entities if type(e).__name__ == "CreateTableRequest"}
     assert tables == {"DimProduct", "FactInternetSales"}
+
+
+def test_tables_created_in_this_run_are_reported_as_deferred_once(caplog):
+    """Five "table not found" warnings against a healthy run read like a defect.
+    The cause is structural and known: the sink buffers Create requests and flushes
+    them in its own close(), which runs after the source's, so a table created in
+    this run cannot be sampled in this run. One info line, not a warning per table."""
+    import logging
+
+    src = _make_source(include_sample_data=True)
+    src.metadata.get_by_name = MagicMock(return_value=None)  # nothing exists yet
+
+    with caplog.at_level(logging.INFO):
+        list(src._iter())
+
+    deferred = [r for r in caplog.records if "sample data deferred" in r.getMessage()]
+    assert len(deferred) == 1, [r.getMessage() for r in caplog.records]
+    assert deferred[0].levelno == logging.INFO
+    message = deferred[0].getMessage()
+    assert "2 table(s)" in message
+    assert "DimProduct" in message and "FactInternetSales" in message
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

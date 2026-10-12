@@ -402,9 +402,24 @@ class SsasSource(Source):
     def _emit_sample_data(self, plan: ServicePlan, cat: Catalog) -> None:
         """Attach a few example rows to each table (reader-side, best-effort).
 
-        Tabular tables are sampled with DAX ``EVALUATE TOPN(n, 'Table')``; the rows are
-        posted via the OpenMetadata sample-data API (not the Create* stream), so the
-        tables must already be sinked — this runs after ``_emit_database`` yields them.
+        Tabular tables are sampled with DAX ``EVALUATE TOPN(n, 'Table')``; the rows
+        go through the OpenMetadata sample-data API, which needs the table entity's
+        id — so the table has to EXIST, and yielding it is not the same as writing
+        it. This docstring used to say "this runs after ``_emit_database`` yields
+        them", which stopped being sufficient when the metadata REST sink began
+        batching: it buffers Create requests and flushes them in its own
+        ``close()`` (``metadata_rest.py``), while a source's ``close()`` runs
+        BEFORE the sink's (``workflow_steps`` is ``[source] + steps``). So on the
+        run that creates a table there is nothing to attach rows to, and nothing a
+        source can do about it — the SDK's own answer for records that need tables
+        to exist is a sink-side deferral, which exists for lifecycle data and not
+        for sample data.
+
+        A table that was created in THIS run is therefore reported once, at info,
+        as deferred rather than five times as "not found" — which read like a
+        defect and counted as warnings against an otherwise healthy run. The rows
+        land on the next run, when the tables are there.
+
         Multidimensional cubes are not sampled here (an MDX sampler is a follow-up).
         Controlled by ``includeSampleData`` (default on) and ``sampleDataRowCount``.
         """
@@ -414,12 +429,13 @@ class SsasSource(Source):
             logger.debug("sample data skipped for %s: only tabular is supported", cat.name)
             return
         n = max(1, self.sample_data_row_count)
+        deferred: list[str] = []
         for schema in plan.schemas:
             for table in schema.tables:
                 fqn = f"{plan.service}.{plan.database}.{schema.name}.{table.name}"
                 entity = self.metadata.get_by_name(entity=Table, fqn=fqn)
                 if entity is None:
-                    logger.warning("sample data skipped: table not found: %s", fqn)
+                    deferred.append(table.name)
                     continue
                 data = self._sample_tabular(cat.name, table.name, n)
                 if data is None:
@@ -428,6 +444,15 @@ class SsasSource(Source):
                     self.metadata.ingest_table_sample_data(table=entity, sample_data=data)
                 except Exception:  # noqa: BLE001 - never fail a run over sample data
                     logger.warning("sample data ingest failed for %s", fqn, exc_info=True)
+        if deferred:
+            logger.info(
+                "sample data deferred for %d table(s) in %s (%s): the sink writes "
+                "created tables when it closes, which is after this runs, so there "
+                "is no table to attach rows to yet. The next run attaches them.",
+                len(deferred),
+                cat.name,
+                ", ".join(sorted(deferred)),
+            )
 
     def _sample_tabular(self, catalog: str, table_name: str, n: int) -> TableData | None:
         """Query up to ``n`` rows of a tabular table via DAX and shape TableData."""
