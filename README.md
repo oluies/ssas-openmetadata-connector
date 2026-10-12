@@ -229,6 +229,20 @@ quoted (`"true"`, `"50"`) and parsed permissively by the connector: `_as_bool` a
 | `endpoint` | string | **for `http`** | — | The `msmdpump` path, e.g. `/olap-tab/msmdpump.dll`. Meaningless on `tcp` and ignored there. |
 | `port` | integer | **for `tcp`** | — | The instance's **pinned** TCP port. No default on purpose: guessing between a default instance's well-known port and a named instance's pinned one presents to the operator as a hang, not an error. |
 
+| `logTargetHost` | boolean | no | `"false"` | Add the instance's host to the startup log line. Off by default: an ingestion log is pasted into issues and shipped to log aggregators, and a host in one is what the leak rule exists to prevent. Turning it on is a deliberate, per-service waiver. |
+
+Every run opens with one line naming what it is, so two runs in one log can be told apart
+and a bug report can say which build produced it:
+
+```
+INFO ssas_om 0.1.4 | transport=tcp library=0.1.2 | authMechanism=ntlm | port=2383 |
+     catalog=TestModel | sampleData=on
+```
+
+`library=` is the installed `ssas-xmla-tcp` version, read from package metadata — so
+`not installed` there explains a `transport='tcp' needs the extra` failure before you go
+looking. The host is absent unless `logTargetHost` is on.
+
 ### Authentication
 
 | option | type | required | default | meaning |
