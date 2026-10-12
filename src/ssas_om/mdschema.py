@@ -5,6 +5,7 @@ attribute columns (from hierarchies/levels). Integer enums are mapped via `enums
 A catalog may expose several cubes (and system perspectives), so rows are filtered
 to real cubes and scoped by CUBE_NAME.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -42,9 +43,15 @@ class MeasureDefinition:
     display_folder: str = ""
     format_string: str = ""
     visible: bool = True
+    # Every cell the server sent, in the order it sent them. A tuple of pairs
+    # rather than a dict so the dataclass stays frozen and hashable, and so the
+    # order is the server's rather than Python's.
+    fields: tuple[tuple[str, str], ...] = ()
 
 
-def measure_definitions(measures_text: str) -> dict[str, MeasureDefinition]:
+def measure_definitions(
+    measures_text: str, include_fields: bool = True
+) -> dict[str, MeasureDefinition]:
     """Parse MDSCHEMA_MEASURES into definitions keyed by MEASURE_NAME.
 
     Keyed by MEASURE_NAME because that is the name a CSDL measure's BI annotation
@@ -56,7 +63,9 @@ def measure_definitions(measures_text: str) -> dict[str, MeasureDefinition]:
         name = r.get("MEASURE_NAME", "")
         if not name:
             continue
+        fields = tuple((k, v) for k, v in r.items() if v) if include_fields else ()
         out[name] = MeasureDefinition(
+            fields=fields,
             name=name,
             description=r.get("DESCRIPTION", ""),
             expression=r.get("EXPRESSION", ""),
@@ -151,8 +160,9 @@ def build_cube(
         measure_groups=[
             r.get("MEASUREGROUP_NAME", "") for r in _for_cube(parse_rowset(mg_text), cube_name)
         ],
-        dimensions=[d for d in parse_dimensions(dims_text, levels_text, cube_name)
-                    if d.dtype != "Measure"],
+        dimensions=[
+            d for d in parse_dimensions(dims_text, levels_text, cube_name) if d.dtype != "Measure"
+        ],
         measures=[m for m in parse_measures(measures_text, cube_name) if m.visible],
     )
 
@@ -164,8 +174,9 @@ def build_cubes_from_client(client: XmlaClient, catalog: str) -> list[Cube]:
 
     cubes_text = dmv("MDSCHEMA_CUBES")
     mg, dims, levels, measures = (
-        dmv("MDSCHEMA_MEASUREGROUPS"), dmv("MDSCHEMA_DIMENSIONS"),
-        dmv("MDSCHEMA_LEVELS"), dmv("MDSCHEMA_MEASURES"),
+        dmv("MDSCHEMA_MEASUREGROUPS"),
+        dmv("MDSCHEMA_DIMENSIONS"),
+        dmv("MDSCHEMA_LEVELS"),
+        dmv("MDSCHEMA_MEASURES"),
     )
-    return [build_cube(name, mg, dims, levels, measures)
-            for name in list_cube_names(cubes_text)]
+    return [build_cube(name, mg, dims, levels, measures) for name in list_cube_names(cubes_text)]
