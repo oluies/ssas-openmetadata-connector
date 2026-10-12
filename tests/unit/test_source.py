@@ -579,3 +579,47 @@ def test_tables_created_in_this_run_are_reported_as_deferred_once(caplog):
     assert "2 table(s)" in message
     assert "DimProduct" in message and "FactInternetSales" in message
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_the_banner_names_both_builds_and_not_the_host(caplog):
+    """A bug report that does not say which build ran is a report about an unknown
+    build. The host is the one thing left out: an ingestion log gets pasted into
+    issues, and the constitution's leak rule is about exactly that."""
+    import logging
+
+    from ssas_om import __version__
+
+    src = _make_source()
+    with caplog.at_level(logging.INFO):
+        src.prepare()
+
+    banner = " ".join(r.getMessage() for r in caplog.records)
+    assert f"ssas_om {__version__}" in banner
+    assert "transport=http" in banner
+    assert "library=" in banner  # the transport library's version, or why not
+    assert "authMechanism=basic" in banner
+    assert "catalog=AWTabular" in banner
+    assert "ssas.internal" not in banner, "the host must not reach a log line by default"
+
+
+def test_the_host_is_logged_only_when_asked_for(caplog):
+    """A per-service waiver, not a default: the operator says so in
+    connectionOptions, and the line says it was asked for."""
+    import logging
+
+    src = _make_source()
+    src.log_target_host = True
+    with caplog.at_level(logging.INFO):
+        src.prepare()
+
+    banner = " ".join(r.getMessage() for r in caplog.records)
+    assert "ssas.internal" in banner
+    assert "logTargetHost is on" in banner
+
+
+def test_the_banner_survives_a_missing_transport_library():
+    """transport='http' legitimately has no [tcp] extra installed, and a banner
+    must not be what makes a working configuration fail."""
+    from ssas_om.source import _transport_library_version
+
+    assert _transport_library_version()  # a version, or "not installed" — never a raise

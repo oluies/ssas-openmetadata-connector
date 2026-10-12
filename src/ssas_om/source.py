@@ -45,6 +45,7 @@ from metadata.ingestion.api.steps import Source
 from metadata.ingestion.ometa.ometa_api import OpenMetadata
 from metadata.utils.logger import ingestion_logger
 
+from . import __version__
 from .classify import Catalog, list_catalogs
 from .client import XmlaClient, parse_rowset
 from .csdl import parse_csdl
@@ -63,6 +64,22 @@ def _om_type(name: str) -> DataType:
         return DataType[name]
     except KeyError:
         return _FALLBACK_TYPE
+
+
+def _transport_library_version() -> str:
+    """The installed ssas-xmla-tcp version, or why there is not one.
+
+    Read from the package rather than imported: on transport='http' the [tcp]
+    extra is legitimately absent, and a banner must not be the thing that makes a
+    working configuration fail. A bug report that does not say which build ran is
+    a report about an unknown build -- the point of printing it at all.
+    """
+    try:
+        from importlib.metadata import version
+
+        return version("ssas-xmla-tcp")
+    except Exception:
+        return "not installed"
 
 
 def _as_bool(value: Any, default: bool) -> bool:
@@ -160,9 +177,15 @@ class SsasSource(Source):
         self.lineage_schema = opts.get("lineageSchema", "dbo")
         # sample data: on by default; a reader can turn it off or cap the row count
         self.include_sample_data = _as_bool(opts.get("includeSampleData"), True)
+        # Off by default, and the default is the interesting half: the host belongs
+        # to the operator's environment, and an ingestion log is pasted into issues
+        # and shipped to aggregators. The constitution forbids a host in a log line
+        # for that reason, so naming it is a deliberate, per-service waiver.
+        self.log_target_host = _as_bool(opts.get("logTargetHost"), False)
         self.sample_data_row_count = _as_int(opts.get("sampleDataRowCount"), 50)
         self.service_name = config.serviceName
         transport = str(opts.get("transport", "http")).lower()
+        self.transport = transport
         # The default mechanism follows the transport, because the two bindings do
         # not offer the same set: HTTP Basic is msmdpump's IIS front end, and the
         # native binding speaks GSS-API only. Defaulting tcp to 'basic' would make
@@ -170,6 +193,8 @@ class SsasSource(Source):
         mech = str(
             opts.get("authMechanism") or _DEFAULT_MECHANISM.get(transport, "basic")
         ).lower()
+        self.auth_mechanism = mech
+        self.port = opts.get("port")
         # kerberos/negotiate authenticate from the ambient ticket cache -- see
         # _requests_auth, which ignores user/password for those mechanisms. Demanding
         # them anyway forced a dummy credential into the service config, where it sat
@@ -237,7 +262,29 @@ class SsasSource(Source):
     ) -> SsasSource:
         return cls(WorkflowSource.model_validate(config_dict), metadata)
 
-    def prepare(self) -> None:  # nothing to pre-fetch
+    def prepare(self) -> None:
+        """Nothing to pre-fetch; this is where the run says what it is.
+
+        Enough to tell two runs apart in a log, and no more: which build of the
+        connector and of the transport library, which binding, which mechanism,
+        which port, which catalog scope. The HOST is omitted unless
+        `logTargetHost` asks for it -- an ingestion log is pasted into issues and
+        shipped to log aggregators, and a host in one is exactly what the
+        constitution's leak rule is about.
+        """
+        logger.info(
+            "ssas_om %s | transport=%s library=%s | authMechanism=%s | port=%s | "
+            "catalog=%s | sampleData=%s",
+            __version__,
+            self.transport,
+            _transport_library_version(),
+            self.auth_mechanism,
+            self.port or "-",
+            self.catalog_opt or "all visible",
+            "on" if self.include_sample_data else "off",
+        )
+        if self.log_target_host:
+            logger.info("target host: %s (logTargetHost is on)", _bare_host(self.host))
         return None
 
     def test_connection(self) -> None:
