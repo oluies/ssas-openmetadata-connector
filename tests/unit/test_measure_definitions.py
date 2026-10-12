@@ -9,6 +9,7 @@ The CSDL side is the recorded response, because the join depends on a detail no
 invented fixture would reproduce: CSDL makes the EDM property identifier-safe, so
 the measure is the column `Total_Sales` while MDSCHEMA calls it `Total Sales`.
 """
+
 from pathlib import Path
 
 from ssas_om.csdl import parse_csdl
@@ -81,11 +82,7 @@ def _planned_columns(definitions):
         database="AWTabular",
         measure_definitions=definitions,
     )
-    return {
-        column.name: column
-        for table in plan.schemas[0].tables
-        for column in table.columns
-    }
+    return {column.name: column for table in plan.schemas[0].tables for column in table.columns}
 
 
 def test_the_join_goes_through_the_reference_name_not_the_column_name():
@@ -124,3 +121,55 @@ def test_an_expression_is_appended_under_its_own_label():
 def test_non_measure_columns_get_no_description():
     columns = _planned_columns(measure_definitions(AGGREGATE))
     assert columns["ProductKey"].description is None
+
+
+def _csdl_without_reference_names() -> str:
+    """The recorded CSDL with the bi:Measure annotation stripped of its names.
+
+    Some models' CSDL carries `<bi:Measure/>` with no ReferenceName and no
+    Caption. The column is still identifier-safe (`Total_Sales`), so the only key
+    left is one MDSCHEMA never uses.
+    """
+    import re
+
+    raw = (FIX / "discover.DISCOVER_CSDL_METADATA.xml").read_text()
+    return re.sub(r"<bi:Measure[^>]*/>", "<bi:Measure/>", raw)
+
+
+def test_the_canonical_spelling_is_the_fallback_when_the_annotation_is_missing():
+    """Underscores against spaces is the whole difference, and a model that omits
+    the annotation would otherwise show every measure as the bare word "measure" --
+    indistinguishable from a model that documents nothing."""
+    model = parse_csdl(_csdl_without_reference_names())
+    measure = next(c for t in model.tables for c in t.columns if c.is_measure)
+    assert measure.name == "Total_Sales"
+    assert measure.reference_name == "", "this fixture is only interesting without it"
+
+    plan, _ = plan_tabular(
+        model=model,
+        service="s",
+        database="d",
+        measure_definitions=measure_definitions(AGGREGATE),
+    )
+    column = next(c for t in plan.schemas[0].tables for c in t.columns if c.is_measure)
+    assert "SUM(FactInternetSales[SalesAmount])" in column.description
+
+
+def test_an_ambiguous_canonical_match_is_refused():
+    """A model holding both spellings would have them silently swapped, which is
+    worse than the missing description the fallback exists to prevent."""
+    from ssas_om.csdl import Column
+    from ssas_om.mapper_tabular import _find_definition
+
+    both = measure_definitions(
+        _rowset(
+            "<row><MEASURE_NAME>Gross Margin</MEASURE_NAME><DESCRIPTION>spaces</DESCRIPTION></row>"
+            "<row><MEASURE_NAME>Gross_Margin</MEASURE_NAME><DESCRIPTION>underscore</DESCRIPTION></row>"
+        )
+    )
+    # an exact key still wins
+    exact = Column("Gross_Margin", "Edm.Double", "DOUBLE", True, is_measure=True)
+    assert _find_definition(exact, both).description == "underscore"
+    # but a column matching neither exactly gets nothing rather than a coin toss
+    ambiguous = Column("gross margin", "Edm.Double", "DOUBLE", True, is_measure=True)
+    assert _find_definition(ambiguous, both) is None
