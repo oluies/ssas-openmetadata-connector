@@ -265,9 +265,14 @@ from the ambient ticket cache and ignore both. Supplying them anyway is harmless
 | `includeSampleData` | boolean | no | `"true"` | Sample a few rows per tabular table for the UI's sample-data tab. Set `"false"` where reading rows is unwelcome — the connector then issues no `EVALUATE` at all. |
 | `sampleDataRowCount` | integer | no | `"50"` | Maximum rows sampled per table. Ignored when `includeSampleData` is false. |
 
+| `includeMeasureRowset` | boolean | no | `"true"` | Append every other cell of the measure's `MDSCHEMA_MEASURES` row to its description, under an `**MDSCHEMA_MEASURES**` heading. Set `"false"` for just the definition. |
+
 Each **measure** column carries its definition as the column description, read from
-`MDSCHEMA_MEASURES` — the modeller's own `DESCRIPTION` text, plus the server's `EXPRESSION`
-under its own label when the measure is calculated. That rowset is reader-accessible, so this
+`MDSCHEMA_MEASURES` — the modeller's own `DESCRIPTION` text, the server's `EXPRESSION`
+under its own label when the measure is calculated, and then the rest of the row verbatim:
+the unique name, the captions, the aggregator, the data type, the display folder, the format
+string, the SQL column name. The connector acts on five of those cells and used to discard
+the other ten, so the catalog showed its selection rather than what the model says. That rowset is reader-accessible, so this
 needs no permission the connector does not already have; `DISCOVER_CSDL_METADATA` carries
 captions but no formula, and `TMSCHEMA_MEASURES`, which does, is admin-gated and stays
 unused. A measure with no definition keeps the bare description `measure`, and a server that

@@ -8,6 +8,7 @@ Configured via a `customDatabase` source whose `connectionOptions` carry: host,
 endpoint, user, password and (optionally) catalog. No admin-gated (TMSCHEMA)
 request is ever issued.
 """
+
 from __future__ import annotations
 
 import os
@@ -163,9 +164,7 @@ class SsasSource(Source):
         super().__init__()
         self.config = config
         self.metadata = metadata
-        opts: dict[str, Any] = dict(
-            config.serviceConnection.root.config.connectionOptions.root
-        )
+        opts: dict[str, Any] = dict(config.serviceConnection.root.config.connectionOptions.root)
         self.host = str(opts["host"]).rstrip("/")
         # `endpoint` is the msmdpump path inside IIS and has no meaning on the
         # native binding, so it is demanded per transport rather than always.
@@ -182,6 +181,11 @@ class SsasSource(Source):
         # and shipped to aggregators. The constitution forbids a host in a log line
         # for that reason, so naming it is a deliberate, per-service waiver.
         self.log_target_host = _as_bool(opts.get("logTargetHost"), False)
+        # On, because the connector acted on five of the rowset's ~fifteen cells
+        # and discarded the rest -- the aggregator, the format string, the display
+        # folder, the SQL column name. A reader of the catalog could not see what
+        # the model said, only what this code chose to keep.
+        self.include_measure_rowset = _as_bool(opts.get("includeMeasureRowset"), True)
         self.sample_data_row_count = _as_int(opts.get("sampleDataRowCount"), 50)
         self.service_name = config.serviceName
         transport = str(opts.get("transport", "http")).lower()
@@ -190,9 +194,7 @@ class SsasSource(Source):
         # not offer the same set: HTTP Basic is msmdpump's IIS front end, and the
         # native binding speaks GSS-API only. Defaulting tcp to 'basic' would make
         # the common case fail on a setting the operator never wrote.
-        mech = str(
-            opts.get("authMechanism") or _DEFAULT_MECHANISM.get(transport, "basic")
-        ).lower()
+        mech = str(opts.get("authMechanism") or _DEFAULT_MECHANISM.get(transport, "basic")).lower()
         self.auth_mechanism = mech
         self.port = opts.get("port")
         # kerberos/negotiate authenticate from the ambient ticket cache -- see
@@ -252,9 +254,7 @@ class SsasSource(Source):
                 auth_mechanism=mech,
             )
         else:
-            raise ValueError(
-                f"unknown transport {transport!r}; expected 'http' or 'tcp'"
-            )
+            raise ValueError(f"unknown transport {transport!r}; expected 'http' or 'tcp'")
 
     @classmethod
     def create(
@@ -412,7 +412,7 @@ class SsasSource(Source):
                 r.fault,
             )
             return {}
-        return measure_definitions(r.text)
+        return measure_definitions(r.text, include_fields=self.include_measure_rowset)
 
     def _plan_cube_catalog(self, cat: Catalog) -> ServicePlan | None:
         cubes = build_cubes_from_client(self.client, cat.name)
@@ -434,9 +434,7 @@ class SsasSource(Source):
         yield Either(right=CreateDatabaseRequest(name=plan.database, service=plan.service))
         for schema in plan.schemas:
             schema_fqn = f"{db}.{schema.name}"
-            yield Either(
-                right=CreateDatabaseSchemaRequest(name=schema.name, database=db)
-            )
+            yield Either(right=CreateDatabaseSchemaRequest(name=schema.name, database=db))
             for table in schema.tables:
                 yield Either(
                     right=CreateTableRequest(

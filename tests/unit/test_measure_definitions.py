@@ -173,3 +173,40 @@ def test_an_ambiguous_canonical_match_is_refused():
     # but a column matching neither exactly gets nothing rather than a coin toss
     ambiguous = Column("gross margin", "Edm.Double", "DOUBLE", True, is_measure=True)
     assert _find_definition(ambiguous, both) is None
+
+
+def test_the_rest_of_the_row_is_appended_under_its_own_heading():
+    """Five cells of about fifteen were acted on and the rest discarded, so a
+    reader of the catalog saw this connector's selection rather than what the model
+    says. Everything else the server sent is now reproduced, in its order."""
+    definitions = measure_definitions(AGGREGATE)
+    description = _planned_columns(definitions)["Total_Sales"].description
+
+    # what was already rendered stays where it was, and is not repeated raw
+    assert description.startswith("Business definition:")
+    assert description.count("Technical definition:") == 1
+    # and the rest arrives verbatim, in the server's order, keys code-formatted
+    block = description.split("**MDSCHEMA_MEASURES**")[1]
+    assert block.index("`CATALOG_NAME`") < block.index("`CUBE_NAME`")
+    assert "`MEASURE_DISPLAY_FOLDER`: Sales" in block
+    assert "`DEFAULT_FORMAT_STRING`: #,0" in block
+    assert "`DESCRIPTION`" not in block, "already shown above; repeating it is noise"
+
+
+def test_the_expression_is_not_repeated_in_the_raw_block():
+    definitions = measure_definitions(CALCULATED)
+    definition = definitions["Margin %"]
+    from ssas_om.mapper_tabular import _rowset_block
+
+    block = _rowset_block(definition)
+    assert "`EXPRESSION`" not in block
+    assert "`MEASURE_IS_VISIBLE`: false" in block
+
+
+def test_the_raw_block_can_be_turned_off():
+    """A noisy default is still a default; a service that does not want fifteen
+    lines per measure says so once."""
+    quiet = measure_definitions(AGGREGATE, include_fields=False)
+    description = _planned_columns(quiet)["Total_Sales"].description
+    assert "SUM(FactInternetSales[SalesAmount])" in description
+    assert "MDSCHEMA_MEASURES" not in description

@@ -4,6 +4,7 @@ A tabular catalog becomes a database service; the model's tables become tables w
 typed columns; measures are columns flagged as measures. Relationships are carried
 through for table-level lineage inside the model.
 """
+
 from __future__ import annotations
 
 import re
@@ -47,6 +48,32 @@ def _find_definition(
     return matches[0] if len(matches) == 1 else None
 
 
+# Rendered above already, so repeating them under the raw block would just be
+# noise -- everything else the server sent is reproduced verbatim.
+_ALREADY_SHOWN = ("DESCRIPTION", "EXPRESSION")
+
+
+def _rowset_block(definition: MeasureDefinition) -> str:
+    """Everything else MDSCHEMA_MEASURES said about this measure, as it said it.
+
+    The server returns about fifteen cells per measure and this connector acted on
+    five of them, so the rest -- the unique name, the captions, the aggregator, the
+    display folder, the format string, the data type, the SQL column name -- were
+    read and thrown away. They are reproduced here, in the server's own order,
+    under their own heading, so the catalog shows what the model actually says
+    rather than this connector's selection from it.
+
+    Markdown, because OpenMetadata renders a description as markdown: the keys are
+    code-formatted so a reader can tell a rowset column from prose.
+    """
+    rows = [
+        f"- `{name}`: {value}" for name, value in definition.fields if name not in _ALREADY_SHOWN
+    ]
+    if not rows:
+        return ""
+    return "**MDSCHEMA_MEASURES**\n" + "\n".join(rows)
+
+
 def _measure_description(
     column: csdl.Column, definitions: dict[str, MeasureDefinition]
 ) -> str | None:
@@ -71,6 +98,9 @@ def _measure_description(
     parts = [definition.description.strip()] if definition.description.strip() else []
     if definition.expression.strip():
         parts.append(f"Expression:\n{definition.expression.strip()}")
+    rowset = _rowset_block(definition)
+    if rowset:
+        parts.append(rowset)
     return "\n\n".join(parts) if parts else "measure"
 
 
