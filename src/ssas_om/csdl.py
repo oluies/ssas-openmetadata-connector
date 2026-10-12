@@ -31,6 +31,11 @@ class Column:
     om_type: str
     nullable: bool
     is_measure: bool = False
+    # What MDSCHEMA calls this measure, which is NOT what CSDL calls the column:
+    # the EDM Property Name is identifier-safe ("Total_Sales") while the BI
+    # annotation and MDSCHEMA_MEASURES both use the modeller's name ("Total
+    # Sales"). Joining on the column name alone silently matches nothing.
+    reference_name: str = ""
 
 
 @dataclass
@@ -69,7 +74,17 @@ def _parse_entity_type(et_el: ET.Element) -> Table:
         )
         if is_system:
             continue
-        is_measure = any(_local(a.tag) == "Measure" for a in child)
+        measure_annotation = next(
+            (a for a in child if _local(a.tag) == "Measure"), None
+        )
+        is_measure = measure_annotation is not None
+        reference_name = ""
+        if measure_annotation is not None:
+            # ReferenceName first, Caption second: the caption is localizable and a
+            # culture-specific one would join to nothing.
+            reference_name = _attr(measure_annotation, "ReferenceName") or _attr(
+                measure_annotation, "Caption"
+            )
         edm = child.attrib.get("Type", "")
         table.columns.append(
             Column(
@@ -78,6 +93,7 @@ def _parse_entity_type(et_el: ET.Element) -> Table:
                 om_type=edm_to_om_type(edm),
                 nullable=child.attrib.get("Nullable", "true") != "false",
                 is_measure=is_measure,
+                reference_name=reference_name,
             )
         )
     return table

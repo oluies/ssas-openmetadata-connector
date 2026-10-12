@@ -50,7 +50,7 @@ from .client import XmlaClient, parse_rowset
 from .csdl import parse_csdl
 from .mapper_cube import plan_cubes
 from .mapper_tabular import plan_tabular
-from .mdschema import build_cubes_from_client
+from .mdschema import MeasureDefinition, build_cubes_from_client, measure_definitions
 from .plan import ServicePlan
 
 logger = ingestion_logger()
@@ -290,8 +290,12 @@ class SsasSource(Source):
             )
             return None
         # relationships are parsed but lineage emission is name-based (see _emit_lineage)
-        plan, _rels = plan_tabular(model=parse_csdl(r.text),
-                                   service=self.service_name, database=cat.name)
+        plan, _rels = plan_tabular(
+            model=parse_csdl(r.text),
+            service=self.service_name,
+            database=cat.name,
+            measure_definitions=self._measure_definitions(cat.name),
+        )
         if not any(sch.tables for sch in plan.schemas):
             # A catalog that yields a database, a schema and nothing else is the
             # shape of a bug, not of success. The report names the two causes and
@@ -310,6 +314,25 @@ class SsasSource(Source):
                 r.text.count("EntityType"),
             )
         return plan
+
+    def _measure_definitions(self, catalog: str) -> dict[str, MeasureDefinition]:
+        """Measure descriptions and formulas, or nothing. Never fatal.
+
+        MDSCHEMA_MEASURES is reader-accessible -- the same rowset the cube path
+        already reads -- so this needs no permission the connector does not have.
+        It is an enrichment, though: a server that will not answer must cost the
+        caller its tables, so a refusal is logged and ingestion continues with the
+        descriptions it had before.
+        """
+        r = self.client.dmv("MDSCHEMA_MEASURES", catalog=catalog)
+        if not r.ok:
+            logger.debug(
+                "no measure definitions for %s: the request was refused (%s)",
+                catalog,
+                r.fault,
+            )
+            return {}
+        return measure_definitions(r.text)
 
     def _plan_cube_catalog(self, cat: Catalog) -> ServicePlan | None:
         cubes = build_cubes_from_client(self.client, cat.name)

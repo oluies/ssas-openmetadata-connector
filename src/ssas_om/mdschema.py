@@ -22,6 +22,52 @@ class MdMeasure:
 
 
 @dataclass(frozen=True)
+class MeasureDefinition:
+    """What MDSCHEMA_MEASURES says about one measure, beyond its name.
+
+    Reader-accessible, and the only route to a definition that is: the CSDL carries
+    captions but no formula, and TMSCHEMA_MEASURES -- which does carry one -- is
+    admin-gated, which this connector deliberately is not.
+
+    `description` is free text the modeller wrote, and in practice that is where the
+    formula lives ("Business definition: ... Technical definition: SUM(...)").
+    `expression` is populated by the server for a calculated measure and empty for a
+    plain aggregate over a column, where the aggregation is structural rather than a
+    formula.
+    """
+
+    name: str
+    description: str = ""
+    expression: str = ""
+    display_folder: str = ""
+    format_string: str = ""
+    visible: bool = True
+
+
+def measure_definitions(measures_text: str) -> dict[str, MeasureDefinition]:
+    """Parse MDSCHEMA_MEASURES into definitions keyed by MEASURE_NAME.
+
+    Keyed by MEASURE_NAME because that is the name a CSDL measure's BI annotation
+    carries in `ReferenceName` -- the EDM Property name is identifier-safe and
+    differs ("Total_Sales" against "Total Sales").
+    """
+    out: dict[str, MeasureDefinition] = {}
+    for r in parse_rowset(measures_text):
+        name = r.get("MEASURE_NAME", "")
+        if not name:
+            continue
+        out[name] = MeasureDefinition(
+            name=name,
+            description=r.get("DESCRIPTION", ""),
+            expression=r.get("EXPRESSION", ""),
+            display_folder=r.get("MEASURE_DISPLAY_FOLDER", ""),
+            format_string=r.get("DEFAULT_FORMAT_STRING", ""),
+            visible=r.get("MEASURE_IS_VISIBLE", "true").lower() not in ("false", "0"),
+        )
+    return out
+
+
+@dataclass(frozen=True)
 class MdColumn:
     name: str
     om_type: str
