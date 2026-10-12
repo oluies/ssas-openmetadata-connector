@@ -116,7 +116,14 @@ jobs:
     name: full suite (OpenMetadata SDK image)
     runs-on: ubuntu-latest
     container:
-      image: docker.getcollate.io/openmetadata/ingestion:2.0.1.0
+      # The SDK series production runs. This pinned
+      # openmetadata/ingestion:2.0.1.0 while deployments had moved to
+      # openmetadata/ingestion:2.0.4.0, so the suite proved the connector against
+      # an SDK nobody ran. The requirement in pyproject.toml is a RANGE precisely
+      # so the image keeps its own SDK -- which means the image tag here is the
+      # only thing deciding what gets tested. (Versions written as image
+      # references: the leak gate reads a bare four-part one as an IPv4 address.)
+      image: docker.getcollate.io/openmetadata/ingestion:2.0.4.0
       # the ingestion image runs as a non-root user; run as root so the Actions
       # runner can write its temp/work dirs (checkout) inside the container.
       options: --user root
