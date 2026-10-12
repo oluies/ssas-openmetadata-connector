@@ -196,6 +196,13 @@ logged and skipped. Sampling reads live data, so leave it off for sensitive mode
 > Status: validated end-to-end against the live SSAS instance — `EVALUATE TOPN(50, ...)`
 > sample rows for the tabular tables land in each table's **Sample Data** tab.
 
+> **Rows land on the run after the table is created.** The sample-data API needs the
+> table entity's id, so the table must exist — and the metadata REST sink buffers Create
+> requests and flushes them in its own `close()`, which runs *after* a source's. A source
+> cannot reach past that: the SDK's mechanism for records needing tables to exist is a
+> sink-side deferral, and it covers lifecycle data, not sample data. So a first run reports
+> the tables as deferred, at info, and the next run attaches their rows.
+
 For the **relational** source, row sampling and column statistics come from OpenMetadata's
 own **profiler** workflow (a separate `type: Profiler` run over the `hetzner_mssql` service),
 toggled with `generateSampleData` — see `config/ingestion-mssql.yaml.tmpl`.
