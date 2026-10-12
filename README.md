@@ -3,7 +3,7 @@
 [![CI](https://github.com/oluies/ssas-openmetadata-connector/actions/workflows/ci.yml/badge.svg?branch=001-ssas-openmetadata-metadata)](https://github.com/oluies/ssas-openmetadata-connector/actions/workflows/ci.yml)
 [![Secret scan](https://github.com/oluies/ssas-openmetadata-connector/actions/workflows/secret-scan.yml/badge.svg?branch=001-ssas-openmetadata-metadata)](https://github.com/oluies/ssas-openmetadata-connector/actions/workflows/secret-scan.yml)
 ![Python](https://img.shields.io/badge/python-3.10%E2%80%933.12-blue)
-![OpenMetadata](https://img.shields.io/badge/OpenMetadata-2.0.1-1890ff)
+![OpenMetadata](https://img.shields.io/badge/OpenMetadata-2.0.x-1890ff)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 ![Checked with ty](https://img.shields.io/badge/types-ty-261230)
@@ -744,7 +744,8 @@ uvx ty check                   # type checker (SDK-free core; source.py is the S
 
 Full coverage (including the `SsasSource` tests) runs where the OpenMetadata SDK is present —
 e.g. inside the ingestion image. CI runs all three: `ruff` + `ty`, the hermetic suite on
-Python 3.10-3.12, and the full suite inside `openmetadata/ingestion:2.0.1.0`. No fixture, log, or commit ever contains a host, IP,
+Python 3.10-3.12, and the full suite inside `openmetadata/ingestion:2.0.4.0` — the SDK series
+deployments run, so what CI proves and what production executes are the same. No fixture, log, or commit ever contains a host, IP,
 username, machine name, SID or connection string (enforced by a pre-commit leak-gate).
 
 ## Repository layout
