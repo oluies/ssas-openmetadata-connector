@@ -26,7 +26,7 @@
 #
 # The default stays the Collate registry at the version compose.yml and CI use;
 # a default that disagrees with them is its own kind of trap.
-ARG BASE_IMAGE=docker.getcollate.io/openmetadata/ingestion:2.0.1.0
+ARG BASE_IMAGE=docker.getcollate.io/openmetadata/ingestion:2.0.5.1
 FROM ${BASE_IMAGE}
 
 USER root
