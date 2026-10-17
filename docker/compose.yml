@@ -502,7 +502,7 @@ services:
       test: [ "CMD", "wget", "-q", "--spider",  "http://localhost:8586/healthcheck" ]
 
   ingestion:
-    image: docker.getcollate.io/openmetadata/ingestion:2.0.1.0
+    image: docker.getcollate.io/openmetadata/ingestion:2.0.5.1
     depends_on:
       elasticsearch:
         condition: service_started
