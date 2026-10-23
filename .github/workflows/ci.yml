@@ -123,7 +123,7 @@ jobs:
       # so the image keeps its own SDK -- which means the image tag here is the
       # only thing deciding what gets tested. (Versions written as image
       # references: the leak gate reads a bare four-part one as an IPv4 address.)
-      image: docker.getcollate.io/openmetadata/ingestion:2.0.4.0
+      image: docker.getcollate.io/openmetadata/ingestion:2.0.6.0
       # the ingestion image runs as a non-root user; run as root so the Actions
       # runner can write its temp/work dirs (checkout) inside the container.
       options: --user root
