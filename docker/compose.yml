@@ -16,7 +16,7 @@ volumes:
   es-data:
 services:
   mysql:
-    image: docker.getcollate.io/openmetadata/db:2.0.1
+    image: docker.getcollate.io/openmetadata/db:2.0.5
     command: "--sort_buffer_size=10M"
     restart: always
     environment:
